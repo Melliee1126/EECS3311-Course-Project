@@ -1,0 +1,98 @@
+[
+  {
+    "restId": "r1",
+    "name": "Pai Northern Thai",
+    "cuisine": "Thai",
+    "address": "18 Duncan St, Toronto",
+    "latitude": 43.6476,
+    "longitude": -79.3886,
+    "rating": 4.6,
+    "priceRange": "$$",
+    "status": "visited",
+    "tags": ["Thai", "Dinner"]
+  },
+  {
+    "restId": "r2",
+    "name": "Ramen Isshin",
+    "cuisine": "Ramen",
+    "address": "421 College St, Toronto",
+    "latitude": 43.6566,
+    "longitude": -79.4078,
+    "rating": 4.5,
+    "priceRange": "$",
+    "status": "saved",
+    "tags": ["Japanese", "Noodles"]
+  },
+  {
+    "restId": "r3",
+    "name": "Gyubee Japanese Grill",
+    "cuisine": "Japanese",
+    "address": "157 Carlton St, Toronto",
+    "latitude": 43.6624,
+    "longitude": -79.3742,
+    "rating": 4.4,
+    "priceRange": "$$",
+    "status": "visited",
+    "tags": ["Japanese", "Grill"]
+  },
+  {
+    "restId": "r4",
+    "name": "Seven Lives Tacos",
+    "cuisine": "Mexican",
+    "address": "72 Kensington Ave, Toronto",
+    "latitude": 43.6546,
+    "longitude": -79.4004,
+    "rating": 4.7,
+    "priceRange": "$",
+    "status": "visited",
+    "tags": ["Tacos", "Casual"]
+  },
+  {
+    "restId": "r5",
+    "name": "Momo Ghar",
+    "cuisine": "Nepalese",
+    "address": "320 Richmond St E, Toronto",
+    "latitude": 43.6538,
+    "longitude": -79.3695,
+    "rating": 4.3,
+    "priceRange": "$",
+    "status": "saved",
+    "tags": ["Dumplings", "Casual"]
+  },
+  {
+    "restId": "r6",
+    "name": "Richmond Station",
+    "cuisine": "Canadian",
+    "address": "1 Richmond St W, Toronto",
+    "latitude": 43.6512,
+    "longitude": -79.3792,
+    "rating": 4.5,
+    "priceRange": "$$$",
+    "status": "saved",
+    "tags": ["Canadian", "Dinner"]
+  },
+  {
+    "restId": "r7",
+    "name": "Imanishi Japanese Kitchen",
+    "cuisine": "Japanese",
+    "address": "1330 Queen St W, Toronto",
+    "latitude": 43.6417,
+    "longitude": -79.4328,
+    "rating": 4.8,
+    "priceRange": "$$",
+    "status": "saved",
+    "tags": ["Japanese", "Quiet"]
+  },
+  {
+    "restId": "r8",
+    "name": "Sunday Pop-up",
+    "cuisine": "Korean",
+    "address": "",
+    "latitude": null,
+    "longitude": null,
+    "rating": 0,
+    "priceRange": "$",
+    "status": "saved",
+    "tags": ["Korean"]
+  }
+]
