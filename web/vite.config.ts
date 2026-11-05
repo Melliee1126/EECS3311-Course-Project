@@ -30,4 +30,9 @@ function restaurantData(): Plugin {
 
 export default defineConfig({
   plugins: [react(), restaurantData()],
+  server: {
+    proxy: {
+      '/api': 'http://localhost:8080',
+    },
+  },
 })

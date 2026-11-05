@@ -5,19 +5,44 @@ const NAV_ITEMS = [
   { src: '/icons/create.png', label: 'Create' },
 ]
 
-export function Sidebar() {
+type Props = {
+  libraryOpen: boolean
+  accountOpen: boolean
+  reviewOpen: boolean
+  onSaved: () => void
+  onCreate: () => void
+  onProfile: () => void
+}
+
+export function Sidebar({ libraryOpen, accountOpen, reviewOpen, onSaved, onCreate, onProfile }: Props) {
   return (
     <aside className="sidebar">
       <div className="nav-column">
         <img className="logo" src="/icons/APP_Logo.png" alt="" />
         <nav className="rail" aria-label="Main">
           {NAV_ITEMS.map((item) => (
-            <button key={item.label} type="button" aria-label={item.label}>
+            <button
+              key={item.label}
+              type="button"
+              aria-label={item.label}
+              aria-pressed={
+                item.label === 'Saved' ? libraryOpen : item.label === 'Create' ? reviewOpen : undefined
+              }
+              onClick={
+                item.label === 'Saved' ? onSaved : item.label === 'Create' ? onCreate : undefined
+              }
+            >
               <img src={item.src} alt="" />
             </button>
           ))}
         </nav>
-        <button type="button" className="avatar" aria-label="Profile">
+        <button
+          type="button"
+          className="avatar"
+          aria-label="Profile"
+          aria-pressed={accountOpen}
+          onClick={onProfile}
+        >
           <PersonIcon />
         </button>
       </div>

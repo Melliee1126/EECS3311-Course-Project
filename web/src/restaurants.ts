@@ -7,8 +7,14 @@ export type Restaurant = {
   longitude: number | null
   rating: number
   priceRange: string
-  status: 'saved' | 'visited'
+  status: 'saved' | 'visited' | 'discovered'
   tags: string[]
+}
+
+export function mergeRestaurants(saved: Restaurant[], discovered: Restaurant[]) {
+  const names = new Set(saved.map((restaurant) => restaurant.name.trim().toLowerCase()))
+  const extra = discovered.filter((restaurant) => !names.has(restaurant.name.trim().toLowerCase()))
+  return [...saved, ...extra]
 }
 
 export function hasLocation(

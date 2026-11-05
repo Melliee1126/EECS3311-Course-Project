@@ -1,18 +1,29 @@
-import { useState } from 'react'
+type Props = {
+  query: string
+  onQueryChange: (query: string) => void
+}
 
-export function SearchBar() {
-  const [query, setQuery] = useState('')
-
+export function SearchBar({ query, onQueryChange }: Props) {
   return (
     <form className="search" role="search" onSubmit={(event) => event.preventDefault()}>
       <PinIcon />
       <span className="search-divider" aria-hidden="true" />
       <input
         value={query}
-        onChange={(event) => setQuery(event.target.value)}
-        placeholder="Search this area"
-        aria-label="Search this area"
+        onChange={(event) => onQueryChange(event.target.value)}
+        placeholder="Search restaurants"
+        aria-label="Search restaurants"
       />
+      {query.trim().length > 0 && (
+        <button
+          type="button"
+          className="search-clear"
+          aria-label="Clear search"
+          onClick={() => onQueryChange('')}
+        >
+          <img src="/icons/close.png" alt="" />
+        </button>
+      )}
       <button type="submit" aria-label="Search">
         <SearchIcon />
       </button>

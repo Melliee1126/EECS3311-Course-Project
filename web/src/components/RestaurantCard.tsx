@@ -1,55 +1,58 @@
-import type { Restaurant } from '../restaurants'
+import { hasLocation, type Restaurant } from '../restaurants'
 
 type Props = {
   restaurants: Restaurant[]
-  offMap: Restaurant[]
-  selected: Restaurant | null
   query: string
+  open: boolean
+  placesLoading: boolean
+  placesNote: string | null
   onSelect: (restId: string) => void
 }
 
-export function RestaurantCard({ restaurants, offMap, selected, query, onSelect }: Props) {
-  return (
-    <aside className="place-card" aria-label="Restaurants">
-      {restaurants.length === 0 ? (
-        <p className="place-empty">No restaurants match the selected filters.</p>
-      ) : selected ? (
-        <PlaceDetail restaurant={selected} />
-      ) : (
-        <p className="place-count">
-          {restaurants.length} restaurant{restaurants.length === 1 ? '' : 's'}
-          {query.trim() ? ' match this search' : ' on your map'}
-        </p>
-      )}
-      {offMap.length > 0 && (
-        <div className="off-map">
-          <p>Shown without a map pin</p>
-          <ul>
-            {offMap.map((restaurant) => (
-              <li key={restaurant.restId}>
-                <button type="button" onClick={() => onSelect(restaurant.restId)}>
-                  {restaurant.name}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </aside>
-  )
-}
+export function RestaurantCard({
+  restaurants,
+  query,
+  open,
+  placesLoading,
+  placesNote,
+  onSelect,
+}: Props) {
+  if (!open) return null
 
-function PlaceDetail({ restaurant }: { restaurant: Restaurant }) {
+  const showEmpty = restaurants.length === 0 && !placesLoading && !placesNote
+
   return (
-    <>
-      <p className="place-status">{restaurant.status}</p>
-      <h2>{restaurant.name}</h2>
-      <p>
-        {restaurant.cuisine} · {restaurant.priceRange}
-        {restaurant.rating > 0 ? ` · ${restaurant.rating}` : ''}
-      </p>
-      <p>{restaurant.address || 'No address on file'}</p>
-      {restaurant.tags.length > 0 && <p className="place-tags">{restaurant.tags.join(' · ')}</p>}
-    </>
+    <section className="results" aria-label="Restaurant results" aria-busy={placesLoading}>
+      <h2 className="results-heading">More on Google</h2>
+      {placesLoading && restaurants.length === 0 && (
+        <p className="results-status">Searching restaurants near you…</p>
+      )}
+      {placesNote && <p className="results-status">{placesNote}</p>}
+      {showEmpty && <p className="results-status">No restaurants match “{query.trim()}”.</p>}
+      {restaurants.length > 0 && (
+        <ul>
+          {restaurants.map((restaurant) => (
+            <li key={restaurant.restId}>
+              <button type="button" className="result" onClick={() => onSelect(restaurant.restId)}>
+                <span className="result-name">{restaurant.name}</span>
+                <span className="result-meta">
+                  {[
+                    restaurant.cuisine,
+                    restaurant.priceRange,
+                    restaurant.rating > 0 ? String(restaurant.rating) : 'Unrated',
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </span>
+                <span className="result-address">{restaurant.address || 'No address on file'}</span>
+                {!hasLocation(restaurant) && (
+                  <span className="result-note">Shown without a map pin</span>
+                )}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   )
 }
