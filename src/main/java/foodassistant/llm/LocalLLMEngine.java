@@ -4,6 +4,7 @@ import foodassistant.model.FoodWords;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /** A short explanation written here when no cloud model is configured. */
 public final class LocalLLMEngine implements LLMEngine {
@@ -69,6 +70,21 @@ public final class LocalLLMEngine implements LLMEngine {
     @Override
     public String reason(String context) {
         return generateResponse(context);
+    }
+
+    @Override
+    public String complete(String system, List<Map<String, String>> messages) {
+        StringBuilder text = new StringBuilder();
+        if (system != null && !system.isBlank()) {
+            text.append(system).append('\n');
+        }
+        if (messages != null) {
+            for (Map<String, String> message : messages) {
+                text.append(message.getOrDefault("role", "user")).append(": ");
+                text.append(message.getOrDefault("content", "")).append('\n');
+            }
+        }
+        return generateResponse(text.toString());
     }
 
     @Override

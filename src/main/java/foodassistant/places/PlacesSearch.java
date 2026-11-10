@@ -53,6 +53,10 @@ public final class PlacesSearch {
     }
 
     public List<Hit> search(String query, double latitude, double longitude) {
+        return search(query, latitude, longitude, List.of());
+    }
+
+    public List<Hit> search(String query, double latitude, double longitude, List<String> priceLevels) {
         if (apiKey.isBlank()) {
             throw new IllegalStateException("Add PLACES_API_KEY to supabase.local. Enable Places API (New) for that key.");
         }
@@ -66,7 +70,7 @@ public final class PlacesSearch {
                 .header("X-Goog-Api-Key", apiKey)
                 .header("X-Goog-FieldMask", FIELDS)
                 .header("Referer", "http://localhost:8080/")
-                .POST(HttpRequest.BodyPublishers.ofString(body(text, latitude, longitude)))
+                .POST(HttpRequest.BodyPublishers.ofString(body(text, latitude, longitude, priceLevels)))
                 .build();
         HttpResponse<String> response = send(request, HttpResponse.BodyHandlers.ofString());
         if (response.statusCode() != 200) {
@@ -133,7 +137,7 @@ public final class PlacesSearch {
         return row;
     }
 
-    private static String body(String query, double latitude, double longitude) {
+    private static String body(String query, double latitude, double longitude, List<String> priceLevels) {
         Map<String, Object> center = new LinkedHashMap<>();
         center.put("latitude", latitude);
         center.put("longitude", longitude);
@@ -150,6 +154,9 @@ public final class PlacesSearch {
         body.put("locationBias", bias);
         body.put("languageCode", "en");
         body.put("regionCode", "ca");
+        if (priceLevels != null && !priceLevels.isEmpty()) {
+            body.put("priceLevels", priceLevels);
+        }
         return Json.stringify(body);
     }
 

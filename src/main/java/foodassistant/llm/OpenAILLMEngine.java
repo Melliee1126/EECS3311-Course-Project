@@ -1,6 +1,7 @@
 package foodassistant.llm;
 
 import java.util.List;
+import java.util.Map;
 
 /** Cloud model, reached through the adapter. */
 public final class OpenAILLMEngine implements LLMEngine {
@@ -18,6 +19,11 @@ public final class OpenAILLMEngine implements LLMEngine {
     @Override
     public String reason(String context) {
         return adapter.reason(context);
+    }
+
+    @Override
+    public String complete(String system, List<Map<String, String>> messages) {
+        return adapter.complete(system, messages);
     }
 
     @Override

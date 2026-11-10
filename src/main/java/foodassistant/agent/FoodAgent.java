@@ -2,13 +2,11 @@ package foodassistant.agent;
 
 import foodassistant.llm.LLMEngine;
 import foodassistant.llm.LLMFactory;
-import foodassistant.llm.LocalLLMEngine;
 import foodassistant.model.Constraint;
 import foodassistant.model.FoodWords;
 import foodassistant.model.Recommendation;
 import foodassistant.model.RecommendationRequest;
 import foodassistant.model.Restaurant;
-import foodassistant.model.Review;
 import foodassistant.model.UserPreferences;
 import foodassistant.places.PlacesSearch;
 import foodassistant.server.Json;
@@ -29,8 +27,8 @@ import java.util.Map;
 public final class FoodAgent {
     private final PlacesSearch places;
     private final MemoryService memory;
-    private final LLMEngine llm;
-    private final ConstraintExtractor extractor = new ConstraintExtractor();
+    private final IntentExtractor intents;
+    private final ResponseGenerator responses;
     private final CandidatesFilter candidatesFilter = new CandidatesFilter();
     private final RankingStrategy tasteRanking = new TasteBasedRanking();
     private final RankingStrategy distanceRanking = new DistanceBasedRanking();
@@ -38,7 +36,9 @@ public final class FoodAgent {
     public FoodAgent(PlacesSearch places, MemoryService memory, LLMFactory llmFactory) {
         this.places = places;
         this.memory = memory;
-        this.llm = llmFactory.createLLM();
+        LLMEngine llm = llmFactory.createLLM();
+        this.intents = new IntentExtractor(llm);
+        this.responses = new ResponseGenerator(llm);
     }
 
     public Answer processRequest(
@@ -57,21 +57,22 @@ public final class FoodAgent {
             throw new IllegalArgumentException("Use 500 characters or fewer.");
         }
         List<Turn> earlier = history == null ? List.of() : history;
-        RecommendationRequest latest = extractor.extract(asked, latitude, longitude);
-        boolean namedFood = readyToSearch(asked, latest);
-        boolean search = forYou || namedFood || (!wantsNew(asked) && (affirmation(asked) || refines(asked)));
-        String focus = search ? focus(asked, earlier) : asked;
-        RecommendationRequest request = extractor.extract(focus, latitude, longitude);
+        Intent intent = intents.extract(asked, earlier);
+        if (forYou) {
+            intent = intent.asSearch();
+        }
         MemoryService.Snapshot snapshot = memory.remember(accountId);
-        if (!search) {
-            String reply = speak("ask", request, snapshot, List.of(), earlier, false);
+        RecommendationRequest request = requestFrom(asked, intent, latitude, longitude);
+        if (!intent.search()) {
+            String reply = responses.generate("ask", intent, request, snapshot, List.of(), earlier, false, false);
             return new Answer(reply, List.of(), snapshot.preferences());
         }
-        return getRecommendations(request, latitude, longitude, forYou, snapshot, earlier);
+        return getRecommendations(request, intent, latitude, longitude, forYou, snapshot, earlier);
     }
 
     public Answer getRecommendations(
             RecommendationRequest request,
+            Intent intent,
             double latitude,
             double longitude,
             boolean forYou,
@@ -80,32 +81,52 @@ public final class FoodAgent {
         UserPreferences taste = snapshot.preferences();
         UserPreferences rankingTaste = TasteProfileUpdater.overlay(taste, snapshot.saved());
         Map<String, String> photos = new LinkedHashMap<>();
-        List<Restaurant> found = retrieveRestaurants(request, rankingTaste, latitude, longitude, forYou, photos);
-        List<Restaurant> filtered = candidatesFilter.filter(found, request.getConstraints());
+        Retrieved retrieved = retrieveRestaurants(intent, rankingTaste, latitude, longitude, forYou, photos);
+        List<Restaurant> filtered = candidatesFilter.filter(retrieved.restaurants(), request.getConstraints());
         if (filtered.isEmpty()) {
-            String reply = speak("none", request, snapshot, List.of(), history, forYou);
+            String reply = responses.generate("none", intent, request, snapshot, List.of(), history, forYou, retrieved.budgetRelaxed());
             return new Answer(reply, List.of(), taste);
         }
         List<Recommendation> ranked = rankRestaurants(filtered, request, rankingTaste, latitude, longitude, forYou, photos);
-        int keep = Math.min(3, ranked.size());
+        int keep = Math.min(5, ranked.size());
         List<Recommendation> top = List.copyOf(ranked.subList(0, keep));
-        String reply = speak("recommend", request, snapshot, top, history, forYou);
+        String reply = responses.generate("recommend", intent, request, snapshot, top, history, forYou, retrieved.budgetRelaxed());
         return new Answer(reply, top, taste);
     }
 
-    private List<Restaurant> retrieveRestaurants(
-            RecommendationRequest request,
+    private Retrieved retrieveRestaurants(
+            Intent intent,
             UserPreferences preferences,
             double latitude,
             double longitude,
             boolean forYou,
             Map<String, String> photos) {
+        String text = searchText(intent, preferences, forYou);
+        List<String> levels = priceLevels(intent.budget());
         RuntimeException searchProblem = null;
         List<PlacesSearch.Hit> hits = List.of();
+        boolean budgetRelaxed = false;
         try {
-            hits = places.search(searchText(request, preferences, forYou), latitude, longitude);
+            if (levels.isEmpty()) {
+                hits = places.search(text, latitude, longitude);
+            } else {
+                hits = places.search(text, latitude, longitude, levels);
+                if (hits.size() < 3) {
+                    budgetRelaxed = true;
+                    hits = merge(hits, places.search(text, latitude, longitude));
+                }
+            }
         } catch (RuntimeException exception) {
-            searchProblem = exception;
+            if (!levels.isEmpty()) {
+                try {
+                    hits = places.search(text, latitude, longitude);
+                    budgetRelaxed = true;
+                } catch (RuntimeException second) {
+                    searchProblem = second;
+                }
+            } else {
+                searchProblem = exception;
+            }
         }
         Map<String, Restaurant> byId = new LinkedHashMap<>();
         for (PlacesSearch.Hit hit : hits) {
@@ -115,6 +136,17 @@ public final class FoodAgent {
         }
         if (byId.isEmpty() && searchProblem != null) {
             throw searchProblem;
+        }
+        return new Retrieved(new ArrayList<>(byId.values()), budgetRelaxed);
+    }
+
+    private static List<PlacesSearch.Hit> merge(List<PlacesSearch.Hit> first, List<PlacesSearch.Hit> second) {
+        Map<String, PlacesSearch.Hit> byId = new LinkedHashMap<>();
+        for (PlacesSearch.Hit hit : first) {
+            byId.put(hit.restaurant().getRestId(), hit);
+        }
+        for (PlacesSearch.Hit hit : second) {
+            byId.putIfAbsent(hit.restaurant().getRestId(), hit);
         }
         return new ArrayList<>(byId.values());
     }
@@ -150,215 +182,93 @@ public final class FoodAgent {
             List<Recommendation> recommendations,
             boolean forYou) {
         MemoryService.Snapshot snapshot = new MemoryService.Snapshot(preferences, List.of(), List.of());
-        return speak(recommendations.isEmpty() ? "none" : "recommend", request, snapshot, recommendations, List.of(), forYou);
+        Intent intent = new Intent("", "", "", "", recommendations.isEmpty() ? "ask" : "search");
+        return responses.generate(
+                recommendations.isEmpty() ? "none" : "recommend",
+                intent,
+                request,
+                snapshot,
+                recommendations,
+                List.of(),
+                forYou,
+                false);
     }
 
-    private String speak(
-            String task,
-            RecommendationRequest request,
-            MemoryService.Snapshot snapshot,
-            List<Recommendation> recommendations,
-            List<Turn> history,
-            boolean forYou) {
-        String prompt = prompt(task, request, snapshot, recommendations, history, forYou);
-        try {
-            String reply = llm.reason(prompt);
-            if (reply != null && !reply.isBlank()) {
-                return shorten(reply);
-            }
-        } catch (RuntimeException exception) {
-            String message = exception.getMessage();
-            System.err.println(message == null || message.isBlank()
-                    ? "Language model did not answer; using the local explanation."
-                    : message);
+    private static RecommendationRequest requestFrom(String asked, Intent intent, double latitude, double longitude) {
+        List<Constraint> constraints = new ArrayList<>();
+        if (!intent.budget().isBlank()) {
+            constraints.add(new Constraint(Constraint.BUDGET, intent.budget(), 1));
         }
-        return shorten(new LocalLLMEngine().reason(prompt));
+        for (String word : FoodWords.mentioned(intent.cuisine())) {
+            String type = dietary(word) ? Constraint.DIETARY : Constraint.CUISINE;
+            constraints.add(new Constraint(type, word, dietary(word) ? 1 : 2));
+        }
+        boolean near = "near me".equalsIgnoreCase(intent.location())
+                || intent.location().toLowerCase(java.util.Locale.ROOT).contains("nearby");
+        if (near) {
+            constraints.add(new Constraint(Constraint.DISTANCE, "near", 2));
+        }
+        double maxPrice = switch (intent.budget()) {
+            case "$" -> 1;
+            case "$$" -> 2;
+            case "$$$" -> 3;
+            case "$$$$" -> 4;
+            default -> 0;
+        };
+        return new RecommendationRequest(asked, latitude + ", " + longitude, "", maxPrice, constraints, near);
     }
 
-    private static String searchText(RecommendationRequest request, UserPreferences preferences, boolean forYou) {
+    private static String searchText(Intent intent, UserPreferences preferences, boolean forYou) {
+        StringBuilder query = new StringBuilder();
         if (!forYou) {
-            List<String> foods = FoodWords.mentioned(request.getQuery());
-            if (!foods.isEmpty()) {
-                return String.join(" ", foods) + " restaurants";
+            if (!intent.dish().isBlank()) {
+                query.append(intent.dish());
+            }
+            if (!intent.cuisine().isBlank() && !intent.dish().toLowerCase(java.util.Locale.ROOT).contains(intent.cuisine().toLowerCase(java.util.Locale.ROOT))) {
+                if (!query.isEmpty()) {
+                    query.append(' ');
+                }
+                query.append(intent.cuisine());
+            }
+            if (!intent.location().isBlank() && !"near me".equalsIgnoreCase(intent.location())) {
+                query.append(' ').append(intent.location());
             }
         }
-        if (!preferences.getInterests().isEmpty()) {
+        if (query.isEmpty() && !preferences.getInterests().isEmpty()) {
             int count = Math.min(3, preferences.getInterests().size());
             return String.join(" ", preferences.getInterests().subList(0, count)) + " restaurants";
         }
-        if (!preferences.getLikes().isEmpty()) {
+        if (query.isEmpty() && !preferences.getLikes().isEmpty()) {
             return preferences.getLikes().get(0) + " restaurants";
         }
-        return "restaurants";
+        if (query.isEmpty()) {
+            return "restaurants";
+        }
+        return query.toString().trim() + " restaurants";
     }
 
-    private static String prompt(
-            String task,
-            RecommendationRequest request,
-            MemoryService.Snapshot snapshot,
-            List<Recommendation> recommendations,
-            List<Turn> history,
-            boolean forYou) {
-        UserPreferences preferences = snapshot.preferences();
-        StringBuilder prompt = new StringBuilder();
-        prompt.append("Task: ").append(task).append('\n');
-        prompt.append("You are a friendly friend helping someone decide where to eat. You are not a search engine.\n");
-        prompt.append("Be casual, honest, and short enough to read in a chat. Plain text only. No markdown, no links, and no invented restaurants, prices, or ratings.\n");
-        if ("ask".equals(task)) {
-            prompt.append("Do not list restaurants. Ask one useful follow-up.\n");
-            prompt.append("If their reviews or interests show a taste, mention it and ask whether to start there or surprise them.\n");
-            prompt.append("If the request is vague, ask what the occasion is or what kind of food they want.\n");
-            prompt.append("If they want something they have not tried, suggest one or two cuisines that are not in their reviews and ask if you should look those up.\n");
-        } else if ("none".equals(task)) {
-            prompt.append("Nothing matched. Say that plainly and offer to raise the budget, try another cuisine, or look a little farther. Ask which they prefer.\n");
-        } else {
-            prompt.append("Use only the places listed. Acknowledge what they asked, mention their taste when it matters, then recommend those places.\n");
-            prompt.append("For each place, put the name on its own line, then cuisine, price, and one reason. End with one follow-up question.\n");
-        }
-        if (forYou) {
-            prompt.append("They pressed For you, so suggest from their taste.\n");
-        }
-        if (history != null && !history.isEmpty()) {
-            prompt.append("\nConversation so far:\n");
-            for (Turn turn : history) {
-                prompt.append("user".equals(turn.role()) ? "User: " : "Assistant: ");
-                prompt.append(turn.text()).append('\n');
-            }
-        }
-        String asked = request.getQuery().isBlank() ? "something that fits your taste" : request.getQuery();
-        prompt.append("\nThey asked: ").append(asked).append('\n');
-        if (!preferences.getDescription().isBlank()) {
-            prompt.append("About them: ").append(preferences.getDescription()).append('\n');
-        }
-        prompt.append("Interests: ").append(display(preferences.getInterests())).append('\n');
-        prompt.append("Likes: ").append(display(preferences.getLikes())).append('\n');
-        prompt.append("Dislikes: ").append(display(preferences.getDislikes())).append('\n');
-        if (!preferences.getPriceComfort().isBlank()) {
-            prompt.append("Budget they usually pick: ").append(preferences.getPriceComfort()).append('\n');
-        }
-        if (!request.getOccasion().isBlank()) {
-            prompt.append("Occasion: ").append(request.getOccasion()).append('\n');
-        }
-        prompt.append("Reviews:\n");
-        List<Review> reviews = snapshot.reviews() == null ? List.of() : snapshot.reviews();
-        int shown = 0;
-        for (Review review : reviews) {
-            if (shown == 6) {
-                break;
-            }
-            String note = review.getBody() == null ? "" : review.getBody().trim();
-            if (note.length() > 80) {
-                note = note.substring(0, 80);
-            }
-            prompt.append("- ")
-                    .append(review.getRestaurantName())
-                    .append(", ")
-                    .append(review.getRating())
-                    .append(" stars, tags ")
-                    .append(review.getTags().isEmpty() ? "none" : String.join(", ", review.getTags()));
-            if (!note.isEmpty()) {
-                prompt.append(". \"").append(note).append('"');
-            }
-            prompt.append('\n');
-            shown++;
-        }
-        if (shown == 0) {
-            prompt.append("none\n");
-        }
-        prompt.append("Places:\n");
-        if (recommendations == null || recommendations.isEmpty()) {
-            prompt.append("none\n");
-        }
-        for (Recommendation recommendation : recommendations) {
-            Restaurant restaurant = recommendation.getRestaurant();
-            prompt.append("- ")
-                    .append(restaurant.getName())
-                    .append(" | ")
-                    .append(restaurant.getCuisine())
-                    .append(" | ")
-                    .append(restaurant.getPriceRange().isBlank() ? "price unknown" : restaurant.getPriceRange())
-                    .append(" | rating ")
-                    .append(restaurant.getRating() > 0 ? restaurant.getRating() : "unrated")
-                    .append(" | ")
-                    .append(recommendation.getExplanation())
-                    .append('\n');
-        }
-        return prompt.toString();
+    private static List<String> priceLevels(String budget) {
+        return switch (budget) {
+            case "$" -> List.of("PRICE_LEVEL_FREE", "PRICE_LEVEL_INEXPENSIVE");
+            case "$$" -> List.of("PRICE_LEVEL_FREE", "PRICE_LEVEL_INEXPENSIVE", "PRICE_LEVEL_MODERATE");
+            case "$$$" -> List.of(
+                    "PRICE_LEVEL_FREE",
+                    "PRICE_LEVEL_INEXPENSIVE",
+                    "PRICE_LEVEL_MODERATE",
+                    "PRICE_LEVEL_EXPENSIVE");
+            default -> List.of();
+        };
     }
 
-    private static boolean readyToSearch(String latest, RecommendationRequest request) {
-        String normal = FoodWords.normalize(latest);
-        if (containsAny(normal, "surprise me", "surprise", "show me", "recommend")) {
-            return true;
-        }
-        for (Constraint constraint : request.getConstraints()) {
-            String type = constraint.getType();
-            if (Constraint.CUISINE.equals(type) || Constraint.DIETARY.equals(type) || Constraint.BUDGET.equals(type)) {
-                return true;
-            }
-        }
-        return false;
+    private static boolean dietary(String word) {
+        String normal = FoodWords.normalize(word);
+        return normal.equals("vegan")
+                || normal.equals("vegetarian")
+                || normal.equals("halal")
+                || normal.equals("gluten free");
     }
 
-    private static String focus(String asked, List<Turn> history) {
-        if (history.isEmpty() || (!affirmation(asked) && !refines(asked))) {
-            return asked;
-        }
-        StringBuilder earlier = new StringBuilder();
-        for (Turn turn : history) {
-            if ("user".equals(turn.role())) {
-                if (!earlier.isEmpty()) {
-                    earlier.append(' ');
-                }
-                earlier.append(turn.text());
-            }
-        }
-        if (earlier.isEmpty()) {
-            return asked;
-        }
-        return earlier + " " + asked;
-    }
-
-    private static boolean affirmation(String text) {
-        String normal = FoodWords.normalize(text);
-        return normal.equals("yes")
-                || normal.equals("yeah")
-                || normal.equals("yep")
-                || normal.equals("sure")
-                || normal.equals("ok")
-                || normal.equals("okay")
-                || normal.equals("start there")
-                || normal.equals("go ahead")
-                || normal.equals("please");
-    }
-
-    private static boolean wantsNew(String text) {
-        String normal = FoodWords.normalize(text);
-        return normal.contains("something new")
-                || normal.contains("somewhere new")
-                || normal.contains("haven't tried")
-                || normal.contains("have not tried")
-                || normal.contains("not tried")
-                || normal.contains("tried before");
-    }
-
-    private static boolean refines(String text) {
-        String normal = FoodWords.normalize(text);
-        return normal.contains("closer")
-                || normal.contains("nearer")
-                || normal.contains("cheaper")
-                || normal.contains("less expensive")
-                || normal.contains("somewhere new")
-                || normal.contains("something new");
-    }
-
-    private static boolean containsAny(String text, String... phrases) {
-        for (String phrase : phrases) {
-            if (text.contains(phrase)) {
-                return true;
-            }
-        }
-        return false;
+    private record Retrieved(List<Restaurant> restaurants, boolean budgetRelaxed) {
     }
 
     public static String response(Answer answer) {
@@ -427,18 +337,6 @@ public final class FoodAgent {
             }
         }
         return out.toString();
-    }
-
-    private static String display(List<String> values) {
-        return values.isEmpty() ? "none" : String.join(", ", values);
-    }
-
-    private static String shorten(String reply) {
-        String trimmed = reply.trim();
-        if (trimmed.length() <= 1400) {
-            return trimmed;
-        }
-        return trimmed.substring(0, 1400).trim() + "…";
     }
 
     public record Answer(String reply, List<Recommendation> recommendations, UserPreferences taste) {

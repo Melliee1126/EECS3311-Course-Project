@@ -3,6 +3,7 @@ package foodassistant.llm;
 import foodassistant.model.FoodWords;
 
 import java.util.List;
+import java.util.Map;
 
 /** Presents the vendor client as the engine the rest of the app calls. */
 public final class LLMProviderAdapter implements LLMEngine {
@@ -20,6 +21,11 @@ public final class LLMProviderAdapter implements LLMEngine {
     @Override
     public String reason(String context) {
         return generateResponse(context);
+    }
+
+    @Override
+    public String complete(String system, List<Map<String, String>> messages) {
+        return client.complete(system, messages);
     }
 
     @Override

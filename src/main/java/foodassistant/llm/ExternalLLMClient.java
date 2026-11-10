@@ -8,6 +8,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -26,17 +27,35 @@ public final class ExternalLLMClient {
     }
 
     public String sendRequest(String prompt) {
+        return complete("", List.of(Map.of("role", "user", "content", prompt == null ? "" : prompt)));
+    }
+
+    public String complete(String system, List<Map<String, String>> messages) {
         if (apiKey.isBlank()) {
             throw new IllegalStateException("Add OPENAI_API_KEY to supabase.local.");
         }
-        Map<String, Object> message = new LinkedHashMap<>();
-        message.put("role", "user");
-        message.put("content", prompt == null ? "" : prompt);
+        List<Map<String, Object>> payload = new ArrayList<>();
+        if (system != null && !system.isBlank()) {
+            payload.add(Map.of("role", "system", "content", system));
+        }
+        if (messages != null) {
+            for (Map<String, String> message : messages) {
+                String role = message.get("role");
+                if (!"system".equals(role) && !"assistant".equals(role) && !"user".equals(role)) {
+                    role = "user";
+                }
+                String content = message.get("content");
+                payload.add(Map.of("role", role, "content", content == null ? "" : content));
+            }
+        }
+        if (payload.isEmpty()) {
+            throw new IllegalStateException("The language model did not answer.");
+        }
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", model);
         body.put("temperature", 0.6);
-        body.put("max_tokens", 500);
-        body.put("messages", List.of(message));
+        body.put("max_tokens", 700);
+        body.put("messages", payload);
         HttpRequest request = HttpRequest.newBuilder(COMPLETIONS)
                 .timeout(Duration.ofSeconds(30))
                 .header("Content-Type", "application/json")
