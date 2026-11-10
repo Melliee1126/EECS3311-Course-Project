@@ -9,11 +9,6 @@ create table if not exists accounts (
 
 alter table accounts add column if not exists birthday text not null default '';
 
-create table if not exists sessions (
-  token text primary key,
-  account_id text not null references accounts (id) on delete cascade
-);
-
 create table if not exists collections (
   account_id text not null references accounts (id) on delete cascade,
   id text not null,
@@ -55,8 +50,33 @@ create table if not exists reviews (
   created_at timestamptz not null default now()
 );
 
+create table if not exists friendships (
+  from_id text not null references accounts (id) on delete cascade,
+  to_id text not null references accounts (id) on delete cascade,
+  status text not null,
+  primary key (from_id, to_id),
+  check (from_id <> to_id),
+  check (status in ('pending', 'accepted'))
+);
+
+create table if not exists avatars (
+  account_id text primary key references accounts (id) on delete cascade,
+  photo text not null
+);
+
+create table if not exists taste_profiles (
+  account_id text primary key references accounts (id) on delete cascade,
+  interests jsonb not null default '[]'::jsonb,
+  likes jsonb not null default '[]'::jsonb,
+  dislikes jsonb not null default '[]'::jsonb,
+  price_comfort text not null default '',
+  description text not null default ''
+);
+
 alter table accounts enable row level security;
-alter table sessions enable row level security;
 alter table collections enable row level security;
 alter table places enable row level security;
 alter table reviews enable row level security;
+alter table friendships enable row level security;
+alter table avatars enable row level security;
+alter table taste_profiles enable row level security;

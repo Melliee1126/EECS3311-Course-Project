@@ -4,6 +4,7 @@ import foodassistant.model.Collection;
 import foodassistant.model.Location;
 import foodassistant.model.Restaurant;
 import foodassistant.model.Review;
+import foodassistant.model.UserPreferences;
 import foodassistant.server.Json;
 
 import java.io.IOException;
@@ -59,12 +60,12 @@ public final class SupabaseDatabase {
         return database;
     }
 
-    public List<AccountRow> accounts() {
-        return accountRows(request("GET", "accounts?select=id,name,email,salt,password_hash,birthday", null));
+    public SupabaseAuth auth() {
+        return new SupabaseAuth(origin, secret);
     }
 
-    public List<SessionRow> sessions() {
-        return sessionRows(request("GET", "sessions?select=token,account_id", null));
+    public List<AccountRow> accounts() {
+        return accountRows(request("GET", "accounts?select=id,name,email,salt,password_hash,birthday", null));
     }
 
     public void insertAccount(AccountRow account) {
@@ -86,24 +87,6 @@ public final class SupabaseDatabase {
         request("PATCH", "accounts?" + eq("id", id), Json.stringify(row));
     }
 
-    public void updatePassword(String id, String salt, String passwordHash) {
-        Map<String, Object> row = new LinkedHashMap<>();
-        row.put("salt", salt);
-        row.put("password_hash", passwordHash);
-        request("PATCH", "accounts?" + eq("id", id), Json.stringify(row));
-    }
-
-    public void insertSession(String token, String accountId) {
-        Map<String, Object> row = new LinkedHashMap<>();
-        row.put("token", token);
-        row.put("account_id", accountId);
-        request("POST", "sessions", Json.stringify(row));
-    }
-
-    public void deleteSession(String token) {
-        request("DELETE", "sessions?" + eq("token", token), null);
-    }
-
     public List<Review> reviews(String accountId) {
         String json = request(
                 "GET",
@@ -113,10 +96,140 @@ public final class SupabaseDatabase {
         return reviewRows(json);
     }
 
+    public int reviewCount(String accountId) {
+        String json = request("GET", "reviews?select=id&" + eq("account_id", accountId), null);
+        Object parsed = Json.parse(json);
+        return parsed instanceof List<?> list ? list.size() : 0;
+    }
+
+    public List<PublicReview> publicReviews(String accountId) {
+        String json = request(
+                "GET",
+                "reviews?select=id,rest_id,restaurant_name,address,latitude,longitude,rating,body,tags,photo,created_at&"
+                        + eq("account_id", accountId) + "&order=created_at.desc",
+                null);
+        return publicReviewRows(json);
+    }
+
     public void insertReview(String accountId, Review review, String createdAt) {
-        Map<String, Object> row = new LinkedHashMap<>();
+        Map<String, Object> row = reviewRow(review);
         row.put("id", review.getId());
         row.put("account_id", accountId);
+        row.put("created_at", createdAt);
+        request("POST", "reviews", Json.stringify(row));
+    }
+
+    public void updateReview(String accountId, Review review) {
+        String json = request(
+                "PATCH",
+                "reviews?" + eq("id", review.getId()) + "&" + eq("account_id", accountId),
+                Json.stringify(reviewRow(review)),
+                "return=representation");
+        if (reviewRows(json).isEmpty()) {
+            throw new IllegalArgumentException("That review was not found.");
+        }
+    }
+
+    public List<FriendLink> linksFor(String accountId) {
+        String id = url(accountId);
+        String json = request(
+                "GET",
+                "friendships?select=from_id,to_id,status&or=(from_id.eq." + id + ",to_id.eq." + id + ")",
+                null);
+        return friendLinks(json);
+    }
+
+    public void insertFriendship(String fromId, String toId, String status) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("from_id", fromId);
+        row.put("to_id", toId);
+        row.put("status", status);
+        request("POST", "friendships", Json.stringify(row));
+    }
+
+    public void updateFriendship(String fromId, String toId, String status) {
+        request(
+                "PATCH",
+                "friendships?" + eq("from_id", fromId) + "&" + eq("to_id", toId),
+                Json.stringify(Map.of("status", status)));
+    }
+
+    public void deleteFriendship(String fromId, String toId) {
+        request("DELETE", "friendships?" + eq("from_id", fromId) + "&" + eq("to_id", toId), null);
+    }
+
+    public String avatar(String accountId) {
+        String json = request("GET", "avatars?select=photo&" + eq("account_id", accountId), null);
+        Object parsed = Json.parse(json);
+        if (parsed instanceof List<?> list && !list.isEmpty() && list.get(0) instanceof Map<?, ?> map) {
+            Object photo = map.get("photo");
+            return photo instanceof String text ? text : "";
+        }
+        return "";
+    }
+
+    public UserPreferences taste(String accountId) {
+        String json = request(
+                "GET",
+                "taste_profiles?select=interests,likes,dislikes,price_comfort,description&" + eq("account_id", accountId),
+                null);
+        Object parsed = Json.parse(json);
+        if (!(parsed instanceof List<?> list) || list.isEmpty() || !(list.get(0) instanceof Map<?, ?> raw)) {
+            return null;
+        }
+        @SuppressWarnings("unchecked")
+        Map<String, Object> map = (Map<String, Object>) raw;
+        return new UserPreferences(
+                tags(map.get("interests")),
+                tags(map.get("likes")),
+                tags(map.get("dislikes")),
+                text(map, "price_comfort"),
+                text(map, "description"));
+    }
+
+    public void saveTaste(String accountId, UserPreferences preferences) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("account_id", accountId);
+        row.put("interests", preferences.getInterests());
+        row.put("likes", preferences.getLikes());
+        row.put("dislikes", preferences.getDislikes());
+        row.put("price_comfort", preferences.getPriceComfort());
+        row.put("description", preferences.getDescription());
+        request(
+                "POST",
+                "taste_profiles?on_conflict=account_id",
+                Json.stringify(row),
+                "resolution=merge-duplicates,return=minimal");
+    }
+
+    public void saveAvatar(String accountId, String photo) {
+        if (photo == null || photo.isBlank()) {
+            request("DELETE", "avatars?" + eq("account_id", accountId), null);
+            return;
+        }
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("account_id", accountId);
+        row.put("photo", photo);
+        request(
+                "POST",
+                "avatars?on_conflict=account_id",
+                Json.stringify(row),
+                "resolution=merge-duplicates,return=minimal");
+    }
+
+    public void deleteReview(String accountId, String id) {
+        String json = request(
+                "DELETE",
+                "reviews?" + eq("id", id) + "&" + eq("account_id", accountId),
+                null,
+                "return=representation");
+        if (reviewRows(json).isEmpty()) {
+            throw new IllegalArgumentException("That review was not found.");
+        }
+    }
+
+    private static Map<String, Object> reviewRow(Review review) {
+        Map<String, Object> row = new LinkedHashMap<>();
         row.put("rest_id", review.getRestId());
         row.put("restaurant_name", review.getRestaurantName());
         row.put("address", review.getAddress());
@@ -126,8 +239,7 @@ public final class SupabaseDatabase {
         row.put("body", review.getBody());
         row.put("tags", review.getTags());
         row.put("photo", review.getPhoto());
-        row.put("created_at", createdAt);
-        request("POST", "reviews", Json.stringify(row));
+        return row;
     }
 
     public List<Collection> collections(String accountId) {
@@ -251,13 +363,19 @@ public final class SupabaseDatabase {
     }
 
     private String request(String method, String path, String body) {
+        return request(method, path, body, body == null ? null : "return=minimal");
+    }
+
+    private String request(String method, String path, String body, String prefer) {
         HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(origin + "/rest/v1/" + path))
                 .timeout(Duration.ofSeconds(30))
                 .header("apikey", secret)
                 .header("Accept", "application/json");
         if (body != null) {
             builder.header("Content-Type", "application/json");
-            builder.header("Prefer", "return=minimal");
+        }
+        if (prefer != null) {
+            builder.header("Prefer", prefer);
         }
         builder.method(method, body == null ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofString(body));
         try {
@@ -336,25 +454,6 @@ public final class SupabaseDatabase {
         return List.copyOf(rows);
     }
 
-    @SuppressWarnings("unchecked")
-    private static List<SessionRow> sessionRows(String json) {
-        Object parsed = Json.parse(json);
-        List<SessionRow> rows = new ArrayList<>();
-        if (parsed instanceof List<?> list) {
-            for (Object item : list) {
-                if (item instanceof Map<?, ?> raw) {
-                    Map<String, Object> map = (Map<String, Object>) raw;
-                    String token = text(map, "token");
-                    String accountId = text(map, "account_id");
-                    if (!token.isBlank() && !accountId.isBlank()) {
-                        rows.add(new SessionRow(token, accountId));
-                    }
-                }
-            }
-        }
-        return List.copyOf(rows);
-    }
-
     private static List<String> tags(Object value) {
         if (value instanceof String text && !text.isBlank()) {
             value = Json.parse(text);
@@ -381,7 +480,33 @@ public final class SupabaseDatabase {
     }
 
     private static String eq(String column, String value) {
-        return column + "=eq." + URLEncoder.encode(value, StandardCharsets.UTF_8);
+        return column + "=eq." + url(value);
+    }
+
+    private static String url(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<FriendLink> friendLinks(String json) {
+        Object parsed = Json.parse(json);
+        List<FriendLink> links = new ArrayList<>();
+        if (!(parsed instanceof List<?> list)) {
+            return links;
+        }
+        for (Object item : list) {
+            if (!(item instanceof Map<?, ?> raw)) {
+                continue;
+            }
+            Map<String, Object> map = (Map<String, Object>) raw;
+            String from = text(map, "from_id");
+            String to = text(map, "to_id");
+            String status = "accepted".equals(map.get("status")) ? "accepted" : "pending";
+            if (!from.isBlank() && !to.isBlank() && !from.equals(to)) {
+                links.add(new FriendLink(from, to, status));
+            }
+        }
+        return List.copyOf(links);
     }
 
     private static String origin(String url) {
@@ -399,6 +524,49 @@ public final class SupabaseDatabase {
     public record AccountRow(String id, String name, String email, String salt, String passwordHash, String birthday) {
     }
 
-    public record SessionRow(String token, String accountId) {
+    public record FriendLink(String fromId, String toId, String status) {
+    }
+
+    public record PublicReview(
+            String id,
+            String restaurant,
+            String restId,
+            String address,
+            Double latitude,
+            Double longitude,
+            int rating,
+            String body,
+            List<String> tags,
+            String photo,
+            String createdAt) {
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<PublicReview> publicReviewRows(String json) {
+        Object parsed = Json.parse(json);
+        List<PublicReview> rows = new ArrayList<>();
+        if (!(parsed instanceof List<?> list)) {
+            return rows;
+        }
+        for (Object item : list) {
+            if (!(item instanceof Map<?, ?> raw)) {
+                continue;
+            }
+            Map<String, Object> map = (Map<String, Object>) raw;
+            Double rating = number(map, "rating");
+            rows.add(new PublicReview(
+                    text(map, "id"),
+                    text(map, "restaurant_name"),
+                    text(map, "rest_id"),
+                    text(map, "address"),
+                    number(map, "latitude"),
+                    number(map, "longitude"),
+                    rating == null ? 0 : rating.intValue(),
+                    text(map, "body"),
+                    tags(map.get("tags")),
+                    text(map, "photo"),
+                    text(map, "created_at")));
+        }
+        return rows;
     }
 }

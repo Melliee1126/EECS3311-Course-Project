@@ -13,7 +13,7 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * The collections the user keeps. The default collection is Saved restaurants.
+ * The collections the user keeps. Saved restaurants and Want to Visit are always present.
  */
 public final class CollectionLibrary {
     private final SupabaseDatabase database;
@@ -29,9 +29,9 @@ public final class CollectionLibrary {
     public static CollectionLibrary load(SupabaseDatabase database, String accountId) {
         List<Collection> loaded = database.collections(accountId);
         if (loaded.isEmpty()) {
-            loaded = List.of(Collection.saved());
+            loaded = List.of(Collection.saved(), Collection.want());
         }
-        CollectionLibrary library = new CollectionLibrary(database, accountId, ensureSaved(loaded));
+        CollectionLibrary library = new CollectionLibrary(database, accountId, ensureDefaults(loaded));
         library.save();
         return library;
     }
@@ -71,7 +71,7 @@ public final class CollectionLibrary {
     public synchronized void delete(String collectionId) {
         Collection collection = find(collectionId);
         if (!collection.canDelete()) {
-            throw new IllegalArgumentException("Saved restaurants cannot be deleted.");
+            throw new IllegalArgumentException(collection.getName() + " cannot be deleted.");
         }
         List<Collection> next = new ArrayList<>();
         for (Collection item : collections) {
@@ -102,7 +102,7 @@ public final class CollectionLibrary {
     }
 
     private void replace(List<Collection> next) {
-        collections = ensureSaved(next);
+        collections = ensureDefaults(next);
         save();
     }
 
@@ -110,18 +110,24 @@ public final class CollectionLibrary {
         database.replaceCollections(accountId, collections);
     }
 
-    private static List<Collection> ensureSaved(List<Collection> source) {
+    private static List<Collection> ensureDefaults(List<Collection> source) {
         Collection saved = null;
+        Collection want = null;
         List<Collection> custom = new ArrayList<>();
         for (Collection collection : source) {
             if (collection.isSaved()) {
                 saved = collection;
+            } else if (collection.isWant() || Collection.WANT_NAME.equalsIgnoreCase(collection.getName())) {
+                want = new Collection(Collection.WANT_ID, Collection.WANT_NAME, collection.getPlaces());
             } else {
                 custom.add(collection);
             }
         }
         List<Collection> next = new ArrayList<>();
-        next.add(saved == null ? Collection.saved() : new Collection(Collection.SAVED_ID, Collection.SAVED_NAME, saved.getPlaces()));
+        next.add(saved == null
+                ? Collection.saved()
+                : new Collection(Collection.SAVED_ID, Collection.SAVED_NAME, saved.getPlaces()));
+        next.add(want == null ? Collection.want() : want);
         next.addAll(custom);
         return List.copyOf(next);
     }

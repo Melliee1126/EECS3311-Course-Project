@@ -10,6 +10,7 @@ type Props = {
   lockToResults: boolean
   userPosition: LatLng | null
   onSelect: (restId: string) => void
+  covered?: boolean
 }
 
 const TORONTO_ZOOM = 12
@@ -118,20 +119,21 @@ export function MapBackground({
   lockToResults,
   userPosition,
   onSelect,
+  covered = false,
 }: Props) {
   if (!apiKey) {
     return (
-      <div className="map-layer map-fallback" role="status">
+      <div className="map-layer map-fallback" role="status" inert={covered}>
         <p>
           Add <code>VITE_GOOGLE_MAPS_API_KEY</code> to <code>web/.env.local</code> and
-          enable the Maps JavaScript API and Places API (New).
+          enable the Maps JavaScript API.
         </p>
       </div>
     )
   }
 
   return (
-    <div className="map-layer">
+    <div className="map-layer" inert={covered}>
       <Map
         className="map-canvas"
         defaultCenter={TORONTO}

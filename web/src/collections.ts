@@ -8,6 +8,11 @@ export type Collection = {
 }
 
 export const SAVED_COLLECTION_ID = 'saved'
+export const WANT_COLLECTION_ID = 'want'
+
+export function isProtectedCollection(id: string) {
+  return id === SAVED_COLLECTION_ID || id === WANT_COLLECTION_ID
+}
 
 export function collectionLabel(collection: Collection) {
   return collection.id === SAVED_COLLECTION_ID ? 'Saved restaurants' : collection.name
@@ -38,7 +43,7 @@ export function useCollections(token: string | null, onSignedOut: () => void) {
     const gate = { ok: true }
     request('/api/collections', 'GET', undefined, token).then((result) => {
       if (!gate.ok) return
-      if (result.signedOut) {
+      if (!result.ok && result.signedOut) {
         signedOutRef.current()
         return
       }
@@ -59,7 +64,7 @@ export function useCollections(token: string | null, onSignedOut: () => void) {
       return { ok: false, error: 'Sign in first.', signedOut: true }
     }
     const result = await request(path, method, body, token)
-    if (result.signedOut) {
+    if (!result.ok && result.signedOut) {
       signedOutRef.current()
       return result
     }

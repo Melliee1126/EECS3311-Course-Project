@@ -1,6 +1,7 @@
 package foodassistant.review;
 
 import foodassistant.account.SupabaseDatabase;
+import foodassistant.feedback.FeedbackPublisher;
 import foodassistant.model.Review;
 import foodassistant.server.Json;
 
@@ -16,12 +17,13 @@ public final class ReviewBoard {
     private static final int MAX_BODY = 500;
     private static final int MAX_TAGS = 8;
     private static final int MAX_TAG_LENGTH = 24;
-    private static final int MAX_PHOTO = 150_000;
 
     private final SupabaseDatabase database;
+    private final FeedbackPublisher feedback;
 
-    public ReviewBoard(SupabaseDatabase database) {
+    public ReviewBoard(SupabaseDatabase database, FeedbackPublisher feedback) {
         this.database = database;
+        this.feedback = feedback;
     }
 
     public List<Review> latest(String accountId) {
@@ -29,6 +31,31 @@ public final class ReviewBoard {
     }
 
     public Review publish(String accountId, Map<String, Object> body) {
+        Review review = review("r:" + UUID.randomUUID(), body);
+        database.insertReview(accountId, review, Instant.now().toString());
+        feedback.notifyObservers(accountId, review);
+        return review;
+    }
+
+    public Review update(String accountId, String id, Map<String, Object> body) {
+        if (id == null || id.isBlank()) {
+            throw new IllegalArgumentException("That review was not found.");
+        }
+        Review review = review(id, body);
+        database.updateReview(accountId, review);
+        feedback.notifyObservers(accountId, review);
+        return review;
+    }
+
+    public void delete(String accountId, String id) {
+        if (id == null || id.isBlank()) {
+            throw new IllegalArgumentException("That review was not found.");
+        }
+        database.deleteReview(accountId, id);
+        feedback.notifyObservers(accountId, null);
+    }
+
+    private static Review review(String id, Map<String, Object> body) {
         String restId = text(body, "restId");
         String name = text(body, "name");
         if (restId.isBlank() || name.isBlank()) {
@@ -46,12 +73,17 @@ public final class ReviewBoard {
             throw new IllegalArgumentException("Use 500 characters or fewer.");
         }
         List<String> tags = tags(body.get("tags"));
-        String photo = text(body, "photo");
-        if (photo.length() > MAX_PHOTO) {
-            throw new IllegalArgumentException("That photo is too large.");
+        List<String> photos = photos(body);
+        if (photos.size() > ReviewPhotos.MAX_PHOTOS) {
+            throw new IllegalArgumentException("Add up to 4 photos.");
         }
-        Review review = new Review(
-                "r:" + UUID.randomUUID(),
+        for (String photo : photos) {
+            if (photo.length() > ReviewPhotos.MAX_PHOTO) {
+                throw new IllegalArgumentException("That photo is too large.");
+            }
+        }
+        return new Review(
+                id,
                 restId,
                 name.trim(),
                 text(body, "address"),
@@ -60,9 +92,7 @@ public final class ReviewBoard {
                 rating,
                 written,
                 tags,
-                photo);
-        database.insertReview(accountId, review, Instant.now().toString());
-        return review;
+                ReviewPhotos.encode(photos));
     }
 
     public static String listResponse(List<Review> reviews) {
@@ -95,8 +125,24 @@ public final class ReviewBoard {
         row.put("rating", review.getRating());
         row.put("body", review.getBody());
         row.put("tags", review.getTags());
-        row.put("photo", review.getPhoto());
+        List<String> photos = ReviewPhotos.decode(review.getPhoto());
+        row.put("photo", photos.isEmpty() ? "" : photos.get(0));
+        row.put("photos", photos);
         return row;
+    }
+
+    private static List<String> photos(Map<String, Object> body) {
+        Object raw = body.get("photos");
+        if (raw instanceof List<?> list) {
+            List<String> photos = new ArrayList<>();
+            for (Object item : list) {
+                if (item instanceof String text && !text.isBlank()) {
+                    photos.add(text);
+                }
+            }
+            return photos;
+        }
+        return ReviewPhotos.decode(text(body, "photo"));
     }
 
     private static int rating(Object value) {

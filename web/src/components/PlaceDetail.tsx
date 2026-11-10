@@ -34,7 +34,11 @@ export function PlaceDetail({
 
   return (
     <section className="place-detail" aria-label={restaurant.name}>
-      <div className="place-photo" />
+      {restaurant.photo ? (
+        <img className="place-photo" src={restaurant.photo} alt="" />
+      ) : (
+        <div className="place-photo" />
+      )}
       <div className="place-copy">
         <h2 className="place-name">{restaurant.name}</h2>
         {restaurant.address && <p className="place-address">{restaurant.address}</p>}

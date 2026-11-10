@@ -4,12 +4,14 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * A named set of restaurants the user keeps. Saved restaurants is the
- * default collection and cannot be removed.
+ * A named set of restaurants the user keeps. Saved restaurants and
+ * Want to Visit are the default collections and cannot be removed.
  */
 public final class Collection {
     public static final String SAVED_ID = "saved";
     public static final String SAVED_NAME = "Saved restaurants";
+    public static final String WANT_ID = "want";
+    public static final String WANT_NAME = "Want to Visit";
     public static final int MAX_NAME_LENGTH = 80;
 
     private final String id;
@@ -36,6 +38,10 @@ public final class Collection {
         return new Collection(SAVED_ID, SAVED_NAME, List.of());
     }
 
+    public static Collection want() {
+        return new Collection(WANT_ID, WANT_NAME, List.of());
+    }
+
     public String getId() {
         return id;
     }
@@ -52,8 +58,12 @@ public final class Collection {
         return SAVED_ID.equals(id);
     }
 
+    public boolean isWant() {
+        return WANT_ID.equals(id);
+    }
+
     public boolean canDelete() {
-        return !isSaved();
+        return !isSaved() && !isWant();
     }
 
     public boolean contains(String restId) {

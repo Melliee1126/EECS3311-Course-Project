@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { SAVED_COLLECTION_ID, collectionLabel, type Collection } from '../collections'
+import { SAVED_COLLECTION_ID, isProtectedCollection, type Collection } from '../collections'
 
 type Props = {
   collections: Collection[]
@@ -24,18 +24,35 @@ export function CollectionsPanel({
   onRemovePlace,
   onSelect,
 }: Props) {
+  const [finder, setFinder] = useState('')
   const active = collections.find((collection) => collection.id === activeId) ?? null
+  const placeCount = new Set(
+    collections.flatMap((collection) => collection.places.map((place) => place.restId)),
+  ).size
+  const needle = finder.trim().toLowerCase()
+  const shown = needle
+    ? collections.filter((collection) => panelLabel(collection).toLowerCase().includes(needle))
+    : collections
   if (active) {
     return (
-      <section className="library" aria-label={collectionLabel(active)}>
+      <section className="library library-detail" aria-label={panelLabel(active)}>
         <button type="button" className="library-back" onClick={onBack}>
-          Collections
+          My Collection
         </button>
         <div className="library-heading">
-          <h2>{collectionLabel(active)}</h2>
-          {active.id !== SAVED_COLLECTION_ID && (
-            <DeleteCollection onDelete={() => onDelete(active.id)} />
-          )}
+          <h2 className={active.id === SAVED_COLLECTION_ID ? undefined : 'library-title'}>
+            {panelLabel(active)}
+            {!isProtectedCollection(active.id) && (
+              <button
+                type="button"
+                className="library-clear"
+                aria-label={`Remove ${panelLabel(active)}`}
+                onClick={() => onDelete(active.id)}
+              >
+                ×
+              </button>
+            )}
+          </h2>
         </div>
         {active.places.length === 0 ? (
           <p className="library-empty">No restaurants in this collection yet.</p>
@@ -63,52 +80,82 @@ export function CollectionsPanel({
   }
 
   return (
-    <section className="library" aria-label="Collections">
-      <h2>Collections</h2>
+    <section className="library library-home" aria-label="My Collection">
+      <h2>My Collection</h2>
+      <p className="library-places-count">
+        {placeCount} {placeCount === 1 ? 'place' : 'places'}
+      </p>
+      <hr className="library-rule" />
+      <label className="library-find">
+        <input
+          type="search"
+          value={finder}
+          placeholder="find a collection"
+          aria-label="Find a collection"
+          onChange={(event) => setFinder(event.target.value)}
+        />
+        <SearchIcon />
+      </label>
       {notice && <p className="library-error">{notice}</p>}
       <ul className="library-list">
-        {collections.map((collection) => (
-          <li key={collection.id}>
+        {shown.map((collection) => (
+          <li key={collection.id} className="library-row">
             <button type="button" className="library-item" onClick={() => onOpen(collection.id)}>
-              <BookmarkIcon />
-              <span>{collectionLabel(collection)}</span>
+              <span className="library-tile" aria-hidden="true">
+                <BookmarkIcon />
+              </span>
+              <span>{panelLabel(collection)}</span>
             </button>
+            {!isProtectedCollection(collection.id) && (
+              <button
+                type="button"
+                className="library-clear"
+                aria-label={`Remove ${panelLabel(collection)}`}
+                onClick={() => onDelete(collection.id)}
+              >
+                ×
+              </button>
+            )}
           </li>
         ))}
+        {shown.length === 0 && <li className="library-empty">No matching collections.</li>}
       </ul>
       <button type="button" className="library-new" onClick={onRequestCreate}>
-        + Create new collection
+        <span className="library-tile" aria-hidden="true">
+          <PlusIcon />
+        </span>
+        <span>Create a new Collection</span>
       </button>
     </section>
   )
 }
 
+function panelLabel(collection: Collection) {
+  return collection.id === SAVED_COLLECTION_ID ? 'Saved Restaurants' : collection.name
+}
+
 function BookmarkIcon() {
   return (
-    <svg className="library-mark" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M7 3.8h10a1 1 0 0 1 1 1V20l-6-3.3L6 20V4.8a1 1 0 0 1 1-1z" />
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M7 4.2h10a1 1 0 0 1 1 1V20l-6-3.2L6 20V5.2a1 1 0 0 1 1-1z" />
     </svg>
   )
 }
 
-function DeleteCollection({ onDelete }: { onDelete: () => void }) {
-  const [confirming, setConfirming] = useState(false)
-  if (!confirming) {
-    return (
-      <button type="button" className="library-delete" onClick={() => setConfirming(true)}>
-        Delete collection
-      </button>
-    )
-  }
+function PlusIcon() {
   return (
-    <span className="library-confirm">
-      <button type="button" onClick={onDelete}>
-        Delete
-      </button>
-      <button type="button" onClick={() => setConfirming(false)}>
-        Cancel
-      </button>
-    </span>
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 6.5v11M6.5 12h11" />
+    </svg>
+  )
+}
+
+function SearchIcon() {
+  return (
+    <svg className="library-find-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="11" cy="11" r="6" />
+      <path d="M15.8 15.8 20 20" />
+    </svg>
   )
 }
 

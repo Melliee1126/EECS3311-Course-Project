@@ -9,12 +9,29 @@ type Props = {
   libraryOpen: boolean
   accountOpen: boolean
   reviewOpen: boolean
+  friendsOpen: boolean
+  forYouActive: boolean
+  avatar: string
+  onForYou: () => void
   onSaved: () => void
   onCreate: () => void
+  onFriends: () => void
   onProfile: () => void
 }
 
-export function Sidebar({ libraryOpen, accountOpen, reviewOpen, onSaved, onCreate, onProfile }: Props) {
+export function Sidebar({
+  libraryOpen,
+  accountOpen,
+  reviewOpen,
+  friendsOpen,
+  forYouActive,
+  avatar,
+  onForYou,
+  onSaved,
+  onCreate,
+  onFriends,
+  onProfile,
+}: Props) {
   return (
     <aside className="sidebar">
       <div className="nav-column">
@@ -26,10 +43,26 @@ export function Sidebar({ libraryOpen, accountOpen, reviewOpen, onSaved, onCreat
               type="button"
               aria-label={item.label}
               aria-pressed={
-                item.label === 'Saved' ? libraryOpen : item.label === 'Create' ? reviewOpen : undefined
+                item.label === 'For you'
+                  ? forYouActive
+                  : item.label === 'Saved'
+                  ? libraryOpen
+                  : item.label === 'Create'
+                    ? reviewOpen
+                    : item.label === 'Friends'
+                      ? friendsOpen
+                      : undefined
               }
               onClick={
-                item.label === 'Saved' ? onSaved : item.label === 'Create' ? onCreate : undefined
+                item.label === 'For you'
+                  ? onForYou
+                  : item.label === 'Saved'
+                  ? onSaved
+                  : item.label === 'Create'
+                    ? onCreate
+                    : item.label === 'Friends'
+                      ? onFriends
+                      : undefined
               }
             >
               <img src={item.src} alt="" />
@@ -43,7 +76,7 @@ export function Sidebar({ libraryOpen, accountOpen, reviewOpen, onSaved, onCreat
           aria-pressed={accountOpen}
           onClick={onProfile}
         >
-          <PersonIcon />
+          {avatar ? <img src={avatar} alt="" /> : <PersonIcon />}
         </button>
       </div>
     </aside>

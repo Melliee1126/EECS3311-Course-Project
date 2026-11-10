@@ -3,18 +3,22 @@ import { searchRestaurants } from '../places'
 import type { Review, ReviewDraft } from '../reviews'
 import type { Restaurant } from '../restaurants'
 import type { LatLng } from '../userLocation'
+import { PhotoFramer, type Placement } from './PhotoFramer'
+import { PhotoGrid } from './PhotoGrid'
+import { fitPhotoShapes, photoFrame, photoShape, type PhotoShape } from '../photoLayout'
 
 type Props = {
   reviews: Review[]
   notice: string | null
-  places: google.maps.PlacesLibrary | null
   bias: LatLng
   onPublish: (draft: ReviewDraft) => Promise<string | null>
+  onUpdate: (id: string, draft: ReviewDraft) => Promise<string | null>
+  onDelete: (id: string) => Promise<string | null>
   onSignIn: () => void
   signedIn: boolean
 }
 
-export function ReviewPanel({ reviews, notice, places, bias, onPublish, onSignIn, signedIn }: Props) {
+export function ReviewPanel({ reviews, notice, bias, onPublish, onUpdate, onDelete, onSignIn, signedIn }: Props) {
   const [showAll, setShowAll] = useState(false)
   const [restaurant, setRestaurant] = useState<Restaurant | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -24,10 +28,15 @@ export function ReviewPanel({ reviews, notice, places, bias, onPublish, onSignIn
   const [tags, setTags] = useState<string[]>([])
   const [tagDraft, setTagDraft] = useState('')
   const [body, setBody] = useState('')
-  const [photo, setPhoto] = useState('')
+  const [photos, setPhotos] = useState<DraftPhoto[]>([])
+  const [framer, setFramer] = useState<FrameDraft | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const photoInput = useRef<HTMLInputElement>(null)
+  const replaceId = useRef<string | null>(null)
+  const photoEpoch = useRef(0)
   const biasRef = useRef(bias)
 
   useEffect(() => {
@@ -36,10 +45,10 @@ export function ReviewPanel({ reviews, notice, places, bias, onPublish, onSignIn
 
   useEffect(() => {
     const trimmed = restaurantQuery.trim()
-    if (!pickerOpen || !places || trimmed.length < 2) return
+    if (!pickerOpen || trimmed.length < 2) return
     const gate = { ok: true }
     const handle = window.setTimeout(() => {
-      searchRestaurants(places, trimmed, biasRef.current)
+      searchRestaurants(trimmed, biasRef.current)
         .then((found) => {
           if (gate.ok) setMatches(found)
         })
@@ -51,7 +60,7 @@ export function ReviewPanel({ reviews, notice, places, bias, onPublish, onSignIn
       gate.ok = false
       window.clearTimeout(handle)
     }
-  }, [pickerOpen, places, restaurantQuery])
+  }, [pickerOpen, restaurantQuery])
 
   const preview = showAll ? reviews : reviews.slice(0, 2)
 
@@ -63,6 +72,63 @@ export function ReviewPanel({ reviews, notice, places, bias, onPublish, onSignIn
     }
     setTags([...tags, next])
     setTagDraft('')
+  }
+
+  function clearFields() {
+    photoEpoch.current += 1
+    setRestaurant(null)
+    setRating(0)
+    setTags([])
+    setTagDraft('')
+    setBody('')
+    setPhotos([])
+    setFramer(null)
+    setPickerOpen(false)
+    setRestaurantQuery('')
+    setMatches([])
+    setEditingId(null)
+  }
+
+  function beginEdit(review: Review) {
+    photoEpoch.current += 1
+    setEditingId(review.id)
+    setConfirmDeleteId(null)
+    setRestaurant({
+      restId: review.restId,
+      name: review.name,
+      cuisine: '',
+      address: review.address,
+      latitude: review.latitude,
+      longitude: review.longitude,
+      rating: 0,
+      priceRange: '',
+      status: 'discovered',
+      tags: [],
+    })
+    setRating(review.rating)
+    setTags(review.tags)
+    setTagDraft('')
+    setBody(review.body)
+    const shots = review.photos?.length ? review.photos : review.photo ? [review.photo] : []
+    const shape = photoShape(shots.length)
+    setPhotos(shots.map((src) => ({ id: photoId(), source: src, framed: src, zoom: 1, x: 0, y: 0, shape })))
+    setFramer(null)
+    setPickerOpen(false)
+    setRestaurantQuery('')
+    setMatches([])
+    setError(null)
+  }
+
+  function remove(id: string) {
+    setPending(true)
+    void onDelete(id).then((message) => {
+      setPending(false)
+      setError(message)
+      if (!message) {
+        setConfirmDeleteId(null)
+        if (editingId === id) clearFields()
+      }
+    })
   }
 
   function publish() {
@@ -78,8 +144,8 @@ export function ReviewPanel({ reviews, notice, places, bias, onPublish, onSignIn
       setError('Choose a rating.')
       return
     }
-    setPending(true)
-    void onPublish({
+    const framed = photos.map((item) => item.framed)
+    const draft: ReviewDraft = {
       restId: restaurant.restId,
       name: restaurant.name,
       address: restaurant.address,
@@ -88,20 +154,42 @@ export function ReviewPanel({ reviews, notice, places, bias, onPublish, onSignIn
       rating,
       body,
       tags,
-      photo,
-    }).then((message) => {
+      photo: framed[0] ?? '',
+      photos: framed,
+    }
+    setPending(true)
+    const request = editingId ? onUpdate(editingId, draft) : onPublish(draft)
+    void request.then((message) => {
       setPending(false)
       setError(message)
-      if (!message) {
-        setRestaurant(null)
-        setRating(0)
-        setTags([])
-        setBody('')
-        setPhoto('')
-        setPickerOpen(false)
-        setRestaurantQuery('')
-      }
+      if (!message) clearFields()
     })
+  }
+
+  function framingFor(id: string | null) {
+    return photoFrame(id == null ? photos.length + 1 : photos.length)
+  }
+
+  function choosePhoto(id: string | null) {
+    if (id == null && photos.length >= 4) {
+      setError('You can add 4 photos.')
+      return
+    }
+    replaceId.current = id
+    photoInput.current?.click()
+  }
+
+  function applyPhotos(next: DraftPhoto[]) {
+    const epoch = ++photoEpoch.current
+    void fitPhotoShapes(next, photoShape(next.length)).then((fitted) => {
+      if (photoEpoch.current === epoch) setPhotos(fitted)
+    })
+  }
+
+  function removePhoto(id: string) {
+    applyPhotos(photos.filter((photo) => photo.id !== id))
+    setFramer((current) => (current?.id === id ? null : current))
+    setError(null)
   }
 
   return (
@@ -119,24 +207,44 @@ export function ReviewPanel({ reviews, notice, places, bias, onPublish, onSignIn
         <ul className="review-cards">
           {preview.map((review) => (
             <li key={review.id}>
-              <article className="review-card">
-                {review.photo ? (
-                  <img className="review-photo" src={review.photo} alt="" />
-                ) : (
-                  <div className="review-photo" />
-                )}
+              <article className={editingId === review.id ? 'review-card is-editing' : 'review-card'}>
+                <ReviewShots photos={review.photos?.length ? review.photos : review.photo ? [review.photo] : []} />
                 <p className="review-card-name">{review.name}</p>
+                <p className="review-card-body">{review.body}</p>
                 <p className="review-card-meta">
                   <PinIcon />
-                  <StarIcon filled />
+                  <span className="review-card-stars" aria-label={`${review.rating} star rating`}>
+                    {[1, 2, 3, 4, 5].map((score) => (
+                      <StarIcon key={score} filled={review.rating >= score} />
+                    ))}
+                  </span>
                 </p>
+                <div className="review-card-actions">
+                  <button type="button" onClick={() => beginEdit(review)}>
+                    Edit
+                  </button>
+                  {confirmDeleteId === review.id ? (
+                    <>
+                      <button type="button" disabled={pending} onClick={() => remove(review.id)}>
+                        Delete
+                      </button>
+                      <button type="button" onClick={() => setConfirmDeleteId(null)}>
+                        Keep
+                      </button>
+                    </>
+                  ) : (
+                    <button type="button" onClick={() => setConfirmDeleteId(review.id)}>
+                      Delete
+                    </button>
+                  )}
+                </div>
               </article>
             </li>
           ))}
         </ul>
       )}
       <hr className="review-rule" />
-      <h2>Create review</h2>
+      <h2>{editingId ? 'Edit review' : 'Create review'}</h2>
       <div className="review-place">
         <button type="button" className="review-place-open" onClick={() => setPickerOpen((open) => !open)}>
           <PinIcon />
@@ -257,7 +365,7 @@ export function ReviewPanel({ reviews, notice, places, bias, onPublish, onSignIn
           onBlur={addTag}
         />
       </div>
-      <div className={body ? 'review-write has-note' : 'review-write'}>
+      <div className="review-write">
         <textarea
           value={body}
           maxLength={500}
@@ -268,22 +376,29 @@ export function ReviewPanel({ reviews, notice, places, bias, onPublish, onSignIn
             setError(null)
           }}
         />
-        {body && (
+        <div className="review-write-bar">
+          {body && (
+            <button
+              type="button"
+              className="review-clear"
+              aria-label="Clear description"
+              onClick={() => {
+                setBody('')
+                setError(null)
+              }}
+            >
+              ×
+            </button>
+          )}
           <button
             type="button"
-            className="review-clear review-clear-note"
-            aria-label="Clear description"
-            onClick={() => {
-              setBody('')
-              setError(null)
-            }}
+            className="review-camera"
+            aria-label="Add photo"
+            onClick={() => choosePhoto(null)}
           >
-            ×
+            <CameraIcon />
           </button>
-        )}
-        <button type="button" className="review-camera" aria-label="Add photo" onClick={() => photoInput.current?.click()}>
-          <CameraIcon />
-        </button>
+        </div>
         <input
           ref={photoInput}
           type="file"
@@ -291,47 +406,111 @@ export function ReviewPanel({ reviews, notice, places, bias, onPublish, onSignIn
           hidden
           onChange={(event) => {
             const file = event.target.files?.[0]
+            const replacing = replaceId.current
+            replaceId.current = null
             event.target.value = ''
             if (!file) return
-            void shrinkPhoto(file).then((next) => {
-              if (!next) {
-                setError('That photo is too large.')
+            if (replacing == null && photos.length >= 4) {
+              setError('You can add 4 photos.')
+              return
+            }
+            void readPhoto(file).then((source) => {
+              if (!source) {
+                setError('That photo could not be opened.')
                 return
               }
-              setPhoto(next)
+              setFramer({ id: replacing, source, zoom: 1, x: 0, y: 0 })
               setError(null)
             })
           }}
         />
       </div>
-      {photo && <img className="review-draft-photo" src={photo} alt="" />}
+      {photos.length > 0 && (
+        <ul className={`review-draft-photos photo-grid photo-grid-${photoFrame(photos.length).layout}`}>
+          {photos.map((item) => (
+            <li key={item.id}>
+              <img src={item.framed} alt="" />
+              <div className="review-draft-actions">
+                <button type="button" onClick={() => setFramer({ id: item.id, source: item.source, zoom: item.zoom, x: item.x, y: item.y })}>
+                  Reframe
+                </button>
+                <button type="button" onClick={() => choosePhoto(item.id)}>
+                  Reselect
+                </button>
+                <button type="button" onClick={() => removePhoto(item.id)}>
+                  Remove
+                </button>
+              </div>
+              <button
+                type="button"
+                className="review-clear"
+                aria-label="Remove photo"
+                onClick={() => removePhoto(item.id)}
+              >
+                ×
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {framer && (
+        <PhotoFramer
+          key={`${framer.source}-${framingFor(framer.id).width}-${framingFor(framer.id).height}`}
+          source={framer.source}
+          width={framingFor(framer.id).width}
+          height={framingFor(framer.id).height}
+          initial={{ zoom: framer.zoom, x: framer.x, y: framer.y }}
+          onCancel={() => setFramer(null)}
+          onReselect={() => choosePhoto(framer.id)}
+          onUse={(framed, placement) => {
+            const shape = photoShape(framer.id == null ? photos.length + 1 : photos.length)
+            const next = framer.id
+              ? photos.map((item) =>
+                  item.id === framer.id ? { ...item, source: framer.source, framed, ...placement, shape } : item,
+                )
+              : [...photos, { id: photoId(), source: framer.source, framed, ...placement, shape }].slice(0, 4)
+            applyPhotos(next)
+            setFramer(null)
+            setError(null)
+          }}
+        />
+      )}
       {error && <p className="library-error">{error}</p>}
-      <button type="button" className="review-publish" disabled={pending} onClick={publish}>
-        Publish
-      </button>
+      <div className="review-actions">
+        {editingId && (
+          <button type="button" className="review-cancel" disabled={pending} onClick={() => {
+            clearFields()
+            setError(null)
+          }}>
+            Cancel
+          </button>
+        )}
+        <button type="button" className="review-publish" disabled={pending} onClick={publish}>
+          {editingId ? 'Save' : 'Publish'}
+        </button>
+      </div>
     </section>
   )
 }
 
-function shrinkPhoto(file: File): Promise<string | null> {
+function ReviewShots({ photos }: { photos: string[] }) {
+  if (photos.length === 0) return <div className="review-photo" />
+  return <PhotoGrid photos={photos} />
+}
+
+type DraftPhoto = Placement & { id: string; source: string; framed: string; shape: PhotoShape }
+type FrameDraft = Placement & { id: string | null; source: string }
+
+function photoId() {
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+function readPhoto(file: File): Promise<string | null> {
   return new Promise((resolve) => {
-    const image = new Image()
-    const url = URL.createObjectURL(file)
-    image.onload = () => {
-      const scale = Math.min(1, 480 / Math.max(image.width, image.height))
-      const canvas = document.createElement('canvas')
-      canvas.width = Math.max(1, Math.round(image.width * scale))
-      canvas.height = Math.max(1, Math.round(image.height * scale))
-      canvas.getContext('2d')?.drawImage(image, 0, 0, canvas.width, canvas.height)
-      URL.revokeObjectURL(url)
-      const data = canvas.toDataURL('image/jpeg', 0.7)
-      resolve(data.length > 150_000 ? null : data)
-    }
-    image.onerror = () => {
-      URL.revokeObjectURL(url)
-      resolve(null)
-    }
-    image.src = url
+    const reader = new FileReader()
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : null)
+    reader.onerror = () => resolve(null)
+    reader.readAsDataURL(file)
   })
 }
 
