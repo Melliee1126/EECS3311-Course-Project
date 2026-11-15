@@ -54,7 +54,7 @@ public final class ExternalLLMClient {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", model);
         body.put("temperature", 0.6);
-        body.put("max_tokens", 700);
+        body.put("max_tokens", 1000);
         body.put("messages", payload);
         HttpRequest request = HttpRequest.newBuilder(COMPLETIONS)
                 .timeout(Duration.ofSeconds(30))

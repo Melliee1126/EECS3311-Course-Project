@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type TransitionEvent } from 'react'
+import { createPortal } from 'react-dom'
 import type { SuggestedRestaurant } from '../assistant'
 
 const CHIPS = ['Comfort food', 'Cafe & Brunch', 'Budget-friendly']
@@ -22,6 +23,7 @@ type Props = {
   sessions: ChatSessionSummary[]
   activeSessionId: string | null
   onSend: (message: string, chips: string[]) => void
+  onForYou: () => void
   onOpenSession: (id: string) => void
   onNewChat: () => void
 }
@@ -33,20 +35,58 @@ export function ChatCard({
   sessions,
   activeSessionId,
   onSend,
+  onForYou,
   onOpenSession,
   onNewChat,
 }: Props) {
   const [draft, setDraft] = useState('')
   const [selected, setSelected] = useState<string[]>([])
   const [localError, setLocalError] = useState<string | null>(null)
-  const [historyOpen, setHistoryOpen] = useState(false)
+  const [historyPresent, setHistoryPresent] = useState(false)
+  const [historyShown, setHistoryShown] = useState(false)
   const logRef = useRef<HTMLDivElement>(null)
+  const historyGeneration = useRef(0)
 
   useEffect(() => {
     const log = logRef.current
     if (!log) return
     log.scrollTop = log.scrollHeight
   }, [thread, busy])
+
+  useEffect(() => {
+    if (!historyPresent) return
+    function onKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') closeHistory()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [historyPresent])
+
+  function openHistory() {
+    const generation = ++historyGeneration.current
+    setHistoryPresent(true)
+    requestAnimationFrame(() => {
+      if (historyGeneration.current === generation) setHistoryShown(true)
+    })
+  }
+
+  function closeHistory() {
+    historyGeneration.current += 1
+    setHistoryShown(false)
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      setHistoryPresent(false)
+    }
+  }
+
+  function toggleHistory() {
+    if (historyPresent) closeHistory()
+    else openHistory()
+  }
+
+  function onDrawerTransition(event: TransitionEvent<HTMLElement>) {
+    if (event.target !== event.currentTarget || event.propertyName !== 'transform') return
+    if (!historyShown) setHistoryPresent(false)
+  }
 
   function toggleChip(chip: string) {
     setSelected((current) =>
@@ -77,47 +117,66 @@ export function ChatCard({
         <button
           type="button"
           className="chat-history-tab"
-          aria-expanded={historyOpen}
-          onClick={() => setHistoryOpen((open) => !open)}
+          aria-expanded={historyPresent}
+          aria-controls="chat-history-drawer"
+          onClick={toggleHistory}
         >
           History
         </button>
       </div>
-      {historyOpen && (
-        <div className="chat-history">
-          <button
-            type="button"
-            className="chat-history-new"
-            onClick={() => {
-              setHistoryOpen(false)
-              onNewChat()
-            }}
-          >
-            New chat
-          </button>
-          {sessions.length === 0 ? (
-            <p className="chat-status">No earlier chats.</p>
-          ) : (
-            <ul>
-              {sessions.map((session) => (
-                <li key={session.id}>
-                  <button
-                    type="button"
-                    aria-current={session.id === activeSessionId ? 'true' : undefined}
-                    onClick={() => {
-                      setHistoryOpen(false)
-                      onOpenSession(session.id)
-                    }}
-                  >
-                    <span>{session.title}</span>
-                    <time dateTime={new Date(session.updatedAt).toISOString()}>{formatWhen(session.updatedAt)}</time>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
+      {historyPresent &&
+        createPortal(
+          <div className={historyShown ? 'history-layer is-open' : 'history-layer'}>
+            <div className="history-overlay" onClick={closeHistory} />
+            <aside
+              id="chat-history-drawer"
+              className="history-drawer"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Chat history"
+              onTransitionEnd={onDrawerTransition}
+            >
+              <div className="history-drawer-head">
+                <h2>History</h2>
+                <button type="button" className="history-close" aria-label="Close" onClick={closeHistory}>
+                  <CloseIcon />
+                </button>
+              </div>
+              <button
+                type="button"
+                className="chat-history-new"
+                onClick={() => {
+                  closeHistory()
+                  onNewChat()
+                }}
+              >
+                New chat
+              </button>
+              {sessions.length === 0 ? (
+                <p className="chat-status">No earlier chats.</p>
+              ) : (
+                <ul className="history-list">
+                  {sessions.map((session) => (
+                    <li key={session.id}>
+                      <button
+                        type="button"
+                        aria-current={session.id === activeSessionId ? 'true' : undefined}
+                        onClick={() => {
+                          closeHistory()
+                          onOpenSession(session.id)
+                        }}
+                      >
+                        <span>{session.title}</span>
+                        <time dateTime={new Date(session.updatedAt).toISOString()}>{formatWhen(session.updatedAt)}</time>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </aside>
+          </div>,
+          document.body,
+        )}
       {talking && (
         <div className="chat-log" ref={logRef}>
           {thread.map((turn, index) => (
@@ -130,6 +189,9 @@ export function ChatCard({
       )}
       {localError && <p className="chat-error">{localError}</p>}
       <div className="chips">
+        <button type="button" className="chip" disabled={busy} onClick={onForYou}>
+          For you
+        </button>
         {CHIPS.map((chip) => {
           const isOn = selected.includes(chip)
           return (
@@ -185,6 +247,14 @@ function formatWhen(updatedAt: number) {
   return sameDay
     ? when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
     : when.toLocaleDateString([], { month: 'short', day: 'numeric' })
+}
+
+function CloseIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M7 7l10 10M17 7 7 17" />
+    </svg>
+  )
 }
 
 function ImageIcon() {

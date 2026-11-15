@@ -23,7 +23,7 @@ import java.util.Map;
 /** Asks Places API (New) for restaurants. The website and the command line both use this. */
 public final class PlacesSearch {
     private static final URI SEARCH = URI.create("https://places.googleapis.com/v1/places:searchText");
-    private static final String FIELDS = "places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.priceLevel,places.primaryType,places.photos";
+    private static final String FIELDS = "places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.priceLevel,places.priceRange,places.primaryType,places.photos";
     private static final double BIAS_METERS = 20_000;
     private static final int MAX_PHOTO = 2_000_000;
 
@@ -57,6 +57,10 @@ public final class PlacesSearch {
     }
 
     public List<Hit> search(String query, double latitude, double longitude, List<String> priceLevels) {
+        return search(query, latitude, longitude, priceLevels, "restaurant");
+    }
+
+    public List<Hit> search(String query, double latitude, double longitude, List<String> priceLevels, String includedType) {
         if (apiKey.isBlank()) {
             throw new IllegalStateException("Add PLACES_API_KEY to supabase.local. Enable Places API (New) for that key.");
         }
@@ -70,7 +74,7 @@ public final class PlacesSearch {
                 .header("X-Goog-Api-Key", apiKey)
                 .header("X-Goog-FieldMask", FIELDS)
                 .header("Referer", "http://localhost:8080/")
-                .POST(HttpRequest.BodyPublishers.ofString(body(text, latitude, longitude, priceLevels)))
+                .POST(HttpRequest.BodyPublishers.ofString(body(text, latitude, longitude, priceLevels, includedType)))
                 .build();
         HttpResponse<String> response = send(request, HttpResponse.BodyHandlers.ofString());
         if (response.statusCode() != 200) {
@@ -129,6 +133,7 @@ public final class PlacesSearch {
         row.put("longitude", restaurant.hasLocation() ? restaurant.getLocation().getLongitude() : null);
         row.put("rating", restaurant.getRating());
         row.put("priceRange", restaurant.getPriceRange());
+        row.put("priceSpan", restaurant.getPriceSpan());
         row.put("status", restaurant.getStatus());
         row.put("tags", restaurant.getTags());
         row.put("photo", hit.photoName().isBlank()
@@ -137,7 +142,7 @@ public final class PlacesSearch {
         return row;
     }
 
-    private static String body(String query, double latitude, double longitude, List<String> priceLevels) {
+    private static String body(String query, double latitude, double longitude, List<String> priceLevels, String includedType) {
         Map<String, Object> center = new LinkedHashMap<>();
         center.put("latitude", latitude);
         center.put("longitude", longitude);
@@ -147,8 +152,9 @@ public final class PlacesSearch {
         Map<String, Object> bias = new LinkedHashMap<>();
         bias.put("circle", circle);
         Map<String, Object> body = new LinkedHashMap<>();
+        String type = includedType == null || includedType.isBlank() ? "restaurant" : includedType.trim();
         body.put("textQuery", query);
-        body.put("includedType", "restaurant");
+        body.put("includedType", type);
         body.put("strictTypeFiltering", false);
         body.put("pageSize", 20);
         body.put("locationBias", bias);
@@ -212,6 +218,7 @@ public final class PlacesSearch {
                 location,
                 rating(place.get("rating")),
                 price(place.get("priceLevel")),
+                priceSpan(place.get("priceRange")),
                 tags,
                 "discovered");
         return new Hit(restaurant, photoName(place.get("photos")));
@@ -287,6 +294,65 @@ public final class PlacesSearch {
             case "4", "VERY_EXPENSIVE", "PRICE_LEVEL_VERY_EXPENSIVE" -> "$$$$";
             default -> "";
         };
+    }
+
+    @SuppressWarnings("unchecked")
+    private static String priceSpan(Object value) {
+        if (!(value instanceof Map<?, ?> raw)) {
+            return "";
+        }
+        Map<String, Object> range = (Map<String, Object>) raw;
+        String start = money(range.get("startPrice"));
+        String end = money(range.get("endPrice"));
+        if (start.isEmpty()) {
+            return end;
+        }
+        if (end.isEmpty() || start.equals(end)) {
+            return start;
+        }
+        if (start.startsWith("$") && end.startsWith("$")) {
+            return start + "-" + end.substring(1);
+        }
+        return start + "-" + end;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static String money(Object value) {
+        if (!(value instanceof Map<?, ?> raw)) {
+            return "";
+        }
+        Map<String, Object> price = (Map<String, Object>) raw;
+        String digits = amount(price.get("units"), price.get("nanos"));
+        if (digits.isEmpty()) {
+            return "";
+        }
+        String code = text(price.get("currencyCode")).toUpperCase(Locale.ROOT);
+        if (code.isEmpty() || code.equals("CAD") || code.equals("USD") || code.equals("AUD") || code.equals("NZD")) {
+            return "$" + digits;
+        }
+        return code + " " + digits;
+    }
+
+    private static String amount(Object units, Object nanos) {
+        if (!(units instanceof String || units instanceof Number) && !(nanos instanceof Number)) {
+            return "";
+        }
+        long whole = 0;
+        if (units instanceof Number number) {
+            whole = number.longValue();
+        } else if (units instanceof String text && !text.isBlank()) {
+            try {
+                whole = Long.parseLong(text.trim());
+            } catch (NumberFormatException exception) {
+                return "";
+            }
+        }
+        int fraction = nanos instanceof Number number ? number.intValue() : 0;
+        if (fraction == 0) {
+            return Long.toString(whole);
+        }
+        int cents = Math.abs(fraction) / 10_000_000;
+        return whole + "." + (cents < 10 ? "0" : "") + cents;
     }
 
     @SuppressWarnings("unchecked")

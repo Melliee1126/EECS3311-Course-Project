@@ -21,8 +21,8 @@ public final class ConstraintExtractor {
             if (contains(avoided, word)) {
                 continue;
             }
-            String type = dietary(word) ? Constraint.DIETARY : Constraint.CUISINE;
-            constraints.add(new Constraint(type, word, dietary(word) ? 1 : 2));
+            String type = FoodWords.isDiet(word) ? Constraint.DIETARY : Constraint.CUISINE;
+            constraints.add(new Constraint(type, word, FoodWords.isDiet(word) ? 1 : 2));
         }
         String budget = budget(lower);
         if (!budget.isEmpty()) {
@@ -127,14 +127,6 @@ public final class ConstraintExtractor {
             return "lunch";
         }
         return "";
-    }
-
-    private static boolean dietary(String word) {
-        String normal = FoodWords.normalize(word);
-        return normal.equals("vegan")
-                || normal.equals("vegetarian")
-                || normal.equals("halal")
-                || normal.equals("gluten free");
     }
 
     private static boolean contains(List<String> values, String word) {

@@ -6,7 +6,6 @@ import foodassistant.model.Restaurant;
 import foodassistant.model.Review;
 import foodassistant.model.UserPreferences;
 
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -15,9 +14,7 @@ import java.util.Map;
 /** Loads and stores one account's taste, reviews, and saved places. */
 public final class MemoryService {
     private final SupabaseDatabase database;
-    private final TasteFile file = new TasteFile(Path.of("data", "taste-profiles.json"));
     private final Object gate = new Object();
-    private boolean remoteUnavailable;
 
     public MemoryService(SupabaseDatabase database) {
         this.database = database;
@@ -64,37 +61,12 @@ public final class MemoryService {
     }
 
     private UserPreferences loadUnlocked(String accountId) {
-        if (remoteUnavailable) {
-            return file.load(accountId);
-        }
-        try {
-            UserPreferences stored = database.taste(accountId);
-            return stored == null ? UserPreferences.empty() : stored;
-        } catch (RuntimeException exception) {
-            if (!missingTable(exception)) {
-                throw exception;
-            }
-            remoteUnavailable = true;
-            System.err.println("Taste profiles are stored in data/taste-profiles.json until supabase/schema.sql is run.");
-            return file.load(accountId);
-        }
+        UserPreferences stored = database.taste(accountId);
+        return stored == null ? UserPreferences.empty() : stored;
     }
 
     private void saveUnlocked(String accountId, UserPreferences preferences) {
-        if (remoteUnavailable) {
-            file.save(accountId, preferences);
-            return;
-        }
-        try {
-            database.saveTaste(accountId, preferences);
-        } catch (RuntimeException exception) {
-            if (!missingTable(exception)) {
-                throw exception;
-            }
-            remoteUnavailable = true;
-            System.err.println("Taste profiles are stored in data/taste-profiles.json until supabase/schema.sql is run.");
-            file.save(accountId, preferences);
-        }
+        database.saveTaste(accountId, preferences);
     }
 
     private List<Restaurant> savedUnlocked(String accountId) {
@@ -105,11 +77,6 @@ public final class MemoryService {
             }
         }
         return new ArrayList<>(byId.values());
-    }
-
-    private static boolean missingTable(RuntimeException exception) {
-        String message = exception.getMessage();
-        return message != null && message.contains("taste_profiles");
     }
 
     public record Snapshot(UserPreferences preferences, List<Restaurant> saved, List<Review> reviews) {

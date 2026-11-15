@@ -137,6 +137,19 @@ public final class AccountBook {
         avatars.save(accountId, avatar);
     }
 
+    public synchronized List<String> friendIds(String accountId) {
+        return friends.friendIds(accountId);
+    }
+
+    public synchronized String displayName(String accountId) {
+        StoredAccount account = findOptional(accountId);
+        return account == null ? "Friend" : account.name;
+    }
+
+    public synchronized String avatarOf(String accountId) {
+        return avatars.get(accountId);
+    }
+
     public synchronized FriendCircle circle(String accountId) {
         return new FriendCircle(
                 cards(accountId, friends.friendIds(accountId)),

@@ -17,22 +17,14 @@ public final class DistanceBasedRanking implements RankingStrategy {
             double kilometers = RestaurantMatch.kilometers(restaurant, context.latitude(), context.longitude());
             double score = kilometers < 0 ? restaurant.getRating() : 40 - Math.min(40, kilometers);
             score += restaurant.getRating();
-            List<String> reasons = new ArrayList<>();
-            String distance = RestaurantMatch.distancePhrase(kilometers);
-            if (!distance.isEmpty()) {
-                reasons.add(distance);
-            }
             for (String interest : preferences.getInterests()) {
                 if (RestaurantMatch.matches(restaurant, interest)) {
                     score += 1;
-                    reasons.add("Matches your interest in " + interest);
                     break;
                 }
             }
-            if (reasons.isEmpty()) {
-                reasons.add("Nearby option");
-            }
-            ranked.add(new Recommendation(restaurant, "", score, String.join(". ", reasons), reasons));
+            String explanation = MatchExplanation.write(restaurant, context);
+            ranked.add(new Recommendation(restaurant, "", score, explanation, List.of(explanation)));
         }
         ranked.sort((left, right) -> {
             int compared = Double.compare(right.getScore(), left.getScore());

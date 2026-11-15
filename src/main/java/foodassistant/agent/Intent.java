@@ -1,12 +1,17 @@
 package foodassistant.agent;
 
-/** Dish, cuisine, budget, location, and whether to search or ask. */
-public record Intent(String dish, String cuisine, String budget, String location, String intent) {
+/** Dish, cuisine, budget, location, mood, and whether to search or ask. */
+public record Intent(String dish, String cuisine, String budget, String location, String intent, String style) {
+    public Intent(String dish, String cuisine, String budget, String location, String intent) {
+        this(dish, cuisine, budget, location, intent, "");
+    }
+
     public Intent {
         dish = clean(dish);
         cuisine = clean(cuisine);
         budget = clean(budget);
         location = clean(location);
+        style = clean(style);
         intent = "search".equals(intent) ? "search" : "ask";
     }
 
@@ -15,11 +20,11 @@ public record Intent(String dish, String cuisine, String budget, String location
     }
 
     public static Intent ask() {
-        return new Intent("", "", "", "", "ask");
+        return new Intent("", "", "", "", "ask", "");
     }
 
     public Intent asSearch() {
-        return new Intent(dish, cuisine, budget, location, "search");
+        return new Intent(dish, cuisine, budget, location, "search", style);
     }
 
     private static String clean(String value) {

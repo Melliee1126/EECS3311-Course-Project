@@ -190,6 +190,7 @@ public final class CollectionLibrary {
                 location,
                 number(map, "rating") == null ? 0 : number(map, "rating"),
                 text(map, "priceRange"),
+                text(map, "priceSpan"),
                 strings(map.get("tags")),
                 text(map, "status").isBlank() ? "discovered" : text(map, "status"));
     }
@@ -229,6 +230,7 @@ public final class CollectionLibrary {
         map.put("longitude", restaurant.hasLocation() ? restaurant.getLocation().getLongitude() : null);
         map.put("rating", restaurant.getRating());
         map.put("priceRange", restaurant.getPriceRange());
+        map.put("priceSpan", restaurant.getPriceSpan());
         map.put("status", restaurant.getStatus());
         map.put("tags", restaurant.getTags());
         return map;

@@ -10,6 +10,7 @@ public final class Restaurant {
     private final Location location;
     private final double rating;
     private final String priceRange;
+    private final String priceSpan;
     private final List<String> tags;
     private final String status;
 
@@ -21,6 +22,7 @@ public final class Restaurant {
             Location location,
             double rating,
             String priceRange,
+            String priceSpan,
             List<String> tags,
             String status) {
         this.restId = restId;
@@ -29,7 +31,8 @@ public final class Restaurant {
         this.address = address;
         this.location = location;
         this.rating = rating;
-        this.priceRange = priceRange;
+        this.priceRange = priceRange == null ? "" : priceRange;
+        this.priceSpan = priceSpan == null ? "" : priceSpan;
         this.tags = List.copyOf(tags);
         this.status = status;
     }
@@ -64,6 +67,27 @@ public final class Restaurant {
 
     public String getPriceRange() {
         return priceRange;
+    }
+
+    /** Dollar span from Places, such as $20-30. The level stays in {@link #getPriceRange()}. */
+    public String getPriceSpan() {
+        return priceSpan;
+    }
+
+    public String storedPrice() {
+        if (priceSpan.isBlank()) {
+            return priceRange;
+        }
+        return priceRange.isBlank() ? priceSpan : priceRange + ";" + priceSpan;
+    }
+
+    public static String[] splitStoredPrice(String stored) {
+        String value = stored == null ? "" : stored.trim();
+        int split = value.indexOf(';');
+        if (split < 0) {
+            return new String[] { value, "" };
+        }
+        return new String[] { value.substring(0, split), value.substring(split + 1) };
     }
 
     public List<String> getTags() {

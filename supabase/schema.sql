@@ -70,7 +70,25 @@ create table if not exists taste_profiles (
   likes jsonb not null default '[]'::jsonb,
   dislikes jsonb not null default '[]'::jsonb,
   price_comfort text not null default '',
-  description text not null default ''
+  description text not null default '',
+  stated jsonb not null default '{}'::jsonb,
+  affinity jsonb not null default '{}'::jsonb
+);
+
+alter table taste_profiles add column if not exists stated jsonb not null default '{}'::jsonb;
+alter table taste_profiles add column if not exists affinity jsonb not null default '{}'::jsonb;
+
+create table if not exists instants (
+  id text primary key,
+  account_id text not null references accounts (id) on delete cascade,
+  photo text not null,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists instant_receipts (
+  instant_id text not null references instants (id) on delete cascade,
+  account_id text not null references accounts (id) on delete cascade,
+  primary key (instant_id, account_id)
 );
 
 alter table accounts enable row level security;
@@ -80,3 +98,5 @@ alter table reviews enable row level security;
 alter table friendships enable row level security;
 alter table avatars enable row level security;
 alter table taste_profiles enable row level security;
+alter table instants enable row level security;
+alter table instant_receipts enable row level security;

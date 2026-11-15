@@ -3,15 +3,15 @@ import type { SuggestedRestaurant } from '../assistant'
 type Props = {
   places: SuggestedRestaurant[]
   selectedId: string | null
-  raised: boolean
+  docked?: boolean
   onSelect: (restId: string) => void
 }
 
-export function RecommendationRow({ places, selectedId, raised, onSelect }: Props) {
+export function RecommendationRow({ places, selectedId, docked = false, onSelect }: Props) {
   if (places.length === 0) return null
 
   return (
-    <div className={raised ? 'recommend-row raised' : 'recommend-row'} aria-label="Recommended restaurants">
+    <div className={docked ? 'recommend-row docked' : 'recommend-row'} aria-label="Recommended restaurants">
       {places.map((place) => (
         <button
           key={place.restId}

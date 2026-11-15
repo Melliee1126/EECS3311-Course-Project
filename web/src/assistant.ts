@@ -5,8 +5,11 @@ export type TasteSnapshot = {
   interests: string[]
   likes: string[]
   dislikes: string[]
+  diet: string[]
+  avoids: string[]
   priceComfort: string
   description: string
+  affinity: Record<string, number>
 }
 
 export type SuggestedRestaurant = Restaurant & {
@@ -24,8 +27,11 @@ const EMPTY_TASTE: TasteSnapshot = {
   interests: [],
   likes: [],
   dislikes: [],
+  diet: [],
+  avoids: [],
   priceComfort: '',
   description: '',
+  affinity: {},
 }
 
 export type ChatTurn = {
@@ -105,9 +111,21 @@ function tasteOf(value: Partial<TasteSnapshot> | undefined): TasteSnapshot {
     interests: strings(value.interests).slice(0, 8),
     likes: strings(value.likes).slice(0, 12),
     dislikes: strings(value.dislikes).slice(0, 12),
+    diet: strings(value.diet),
+    avoids: strings(value.avoids),
     priceComfort: typeof value.priceComfort === 'string' ? value.priceComfort : '',
     description: typeof value.description === 'string' ? value.description : '',
+    affinity: scores(value.affinity),
   }
+}
+
+function scores(value: unknown): Record<string, number> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const affinity: Record<string, number> = {}
+  for (const [food, score] of Object.entries(value)) {
+    if (typeof score === 'number' && Number.isFinite(score) && score !== 0) affinity[food] = score
+  }
+  return affinity
 }
 
 function strings(value: unknown): string[] {
@@ -129,6 +147,7 @@ function restaurantOf(value: unknown): SuggestedRestaurant | null {
     longitude: typeof raw.longitude === 'number' ? raw.longitude : null,
     rating: typeof raw.rating === 'number' ? raw.rating : 0,
     priceRange: typeof raw.priceRange === 'string' ? raw.priceRange : '',
+    priceSpan: typeof raw.priceSpan === 'string' ? raw.priceSpan : '',
     status,
     tags: strings(raw.tags),
     photo: typeof raw.photo === 'string' ? raw.photo : '',

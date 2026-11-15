@@ -7,6 +7,7 @@ export type Restaurant = {
   longitude: number | null
   rating: number
   priceRange: string
+  priceSpan?: string
   status: 'saved' | 'visited' | 'discovered'
   tags: string[]
   photo?: string

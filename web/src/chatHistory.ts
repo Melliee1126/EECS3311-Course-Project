@@ -73,6 +73,7 @@ function placeOf(value: unknown): SuggestedRestaurant[] {
       longitude: typeof raw.longitude === 'number' ? raw.longitude : null,
       rating: typeof raw.rating === 'number' ? raw.rating : 0,
       priceRange: typeof raw.priceRange === 'string' ? raw.priceRange : '',
+      priceSpan: typeof raw.priceSpan === 'string' ? raw.priceSpan : '',
       status,
       tags: Array.isArray(raw.tags) ? raw.tags.filter((tag): tag is string => typeof tag === 'string') : [],
       photo: typeof raw.photo === 'string' ? raw.photo : '',

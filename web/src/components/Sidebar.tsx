@@ -1,18 +1,18 @@
 const NAV_ITEMS = [
-  { src: '/icons/instant.png', label: 'For you' },
+  { src: '/icons/instant.png', label: 'Instant' },
   { src: '/icons/feed.png', label: 'Friends' },
   { src: '/icons/bookmark.png', label: 'Saved' },
   { src: '/icons/create.png', label: 'Create' },
-]
+] as const
 
 type Props = {
   libraryOpen: boolean
   accountOpen: boolean
   reviewOpen: boolean
   friendsOpen: boolean
-  forYouActive: boolean
+  instantOpen: boolean
   avatar: string
-  onForYou: () => void
+  onInstant: () => void
   onSaved: () => void
   onCreate: () => void
   onFriends: () => void
@@ -24,14 +24,28 @@ export function Sidebar({
   accountOpen,
   reviewOpen,
   friendsOpen,
-  forYouActive,
+  instantOpen,
   avatar,
-  onForYou,
+  onInstant,
   onSaved,
   onCreate,
   onFriends,
   onProfile,
 }: Props) {
+  function pressed(label: (typeof NAV_ITEMS)[number]['label']) {
+    if (label === 'Instant') return instantOpen
+    if (label === 'Saved') return libraryOpen
+    if (label === 'Create') return reviewOpen
+    return friendsOpen
+  }
+
+  function activate(label: (typeof NAV_ITEMS)[number]['label']) {
+    if (label === 'Instant') onInstant()
+    else if (label === 'Saved') onSaved()
+    else if (label === 'Create') onCreate()
+    else onFriends()
+  }
+
   return (
     <aside className="sidebar">
       <div className="nav-column">
@@ -42,28 +56,8 @@ export function Sidebar({
               key={item.label}
               type="button"
               aria-label={item.label}
-              aria-pressed={
-                item.label === 'For you'
-                  ? forYouActive
-                  : item.label === 'Saved'
-                  ? libraryOpen
-                  : item.label === 'Create'
-                    ? reviewOpen
-                    : item.label === 'Friends'
-                      ? friendsOpen
-                      : undefined
-              }
-              onClick={
-                item.label === 'For you'
-                  ? onForYou
-                  : item.label === 'Saved'
-                  ? onSaved
-                  : item.label === 'Create'
-                    ? onCreate
-                    : item.label === 'Friends'
-                      ? onFriends
-                      : undefined
-              }
+              aria-pressed={pressed(item.label)}
+              onClick={() => activate(item.label)}
             >
               <img src={item.src} alt="" />
             </button>

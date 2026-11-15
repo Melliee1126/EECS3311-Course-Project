@@ -9,6 +9,7 @@ import foodassistant.account.SupabaseDatabase;
 import foodassistant.agent.FoodAgent;
 import foodassistant.collection.CollectionLibrary;
 import foodassistant.feedback.FeedbackPublisher;
+import foodassistant.instant.InstantBoard;
 import foodassistant.llm.LLMFactory;
 import foodassistant.model.Account;
 import foodassistant.model.Collection;
@@ -40,6 +41,7 @@ public final class CollectionServer {
     private final MemoryService memory;
     private final FoodAgent agent;
     private final FeedbackPublisher feedback;
+    private final InstantBoard instants;
     private final HttpServer server;
 
     public CollectionServer(
@@ -50,6 +52,7 @@ public final class CollectionServer {
             MemoryService memory,
             FoodAgent agent,
             FeedbackPublisher feedback,
+            InstantBoard instants,
             int port) throws IOException {
         this.accounts = accounts;
         this.collections = collections;
@@ -58,12 +61,14 @@ public final class CollectionServer {
         this.memory = memory;
         this.agent = agent;
         this.feedback = feedback;
+        this.instants = instants;
         this.server = HttpServer.create(new InetSocketAddress(port), 0);
         this.server.createContext("/api/accounts", this::accounts);
         this.server.createContext("/api/sessions", this::sessions);
         this.server.createContext("/api/friends", this::friends);
         this.server.createContext("/api/collections", this::collections);
         this.server.createContext("/api/reviews", this::reviews);
+        this.server.createContext("/api/instants", this::instants);
         this.server.createContext("/api/search", this::search);
         this.server.createContext("/api/places/photo", this::photo);
         this.server.createContext("/api/chat", this::chat);
@@ -83,7 +88,9 @@ public final class CollectionServer {
         ReviewBoard reviews = new ReviewBoard(database, feedback);
         PlacesSearch places = PlacesSearch.fromFile(settings);
         FoodAgent agent = new FoodAgent(places, memory, LLMFactory.fromFile(settings));
-        CollectionServer server = new CollectionServer(accounts, collections, reviews, places, memory, agent, feedback, port);
+        InstantBoard instants = new InstantBoard(database, accounts);
+        CollectionServer server = new CollectionServer(
+                accounts, collections, reviews, places, memory, agent, feedback, instants, port);
         server.start();
         System.out.println("Java program listening on http://localhost:" + port);
     }
@@ -344,6 +351,37 @@ public final class CollectionServer {
             send(exchange, 400, error(exception.getMessage()));
         } catch (RuntimeException exception) {
             send(exchange, 500, error("Could not update the taste profile."));
+        }
+    }
+
+    private void instants(HttpExchange exchange) throws IOException {
+        if (preflight(exchange)) {
+            return;
+        }
+        try {
+            Account account = requireAccount(exchange);
+            String method = exchange.getRequestMethod();
+            if ("GET".equals(method) && "/api/instants".equals(exchange.getRequestURI().getPath())) {
+                send(exchange, 200, instants.inboxResponse(account.getId()));
+                return;
+            }
+            if ("POST".equals(method) && "/api/instants".equals(exchange.getRequestURI().getPath())) {
+                instants.share(account.getId(), object(body(exchange)));
+                send(exchange, 200, Json.stringify(Map.of("ok", true)));
+                return;
+            }
+            send(exchange, 405, error("Method not allowed"));
+        } catch (SignInRequired exception) {
+            send(exchange, 401, error(exception.getMessage()));
+        } catch (IllegalArgumentException exception) {
+            send(exchange, 400, error(exception.getMessage()));
+        } catch (RuntimeException exception) {
+            String message = exception.getMessage() == null ? "" : exception.getMessage();
+            if (message.contains("instant")) {
+                send(exchange, 500, error("Run supabase/schema.sql again so instants can be saved."));
+                return;
+            }
+            send(exchange, 500, error("Could not share that instant."));
         }
     }
 

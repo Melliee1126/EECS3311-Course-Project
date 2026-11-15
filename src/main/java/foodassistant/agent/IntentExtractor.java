@@ -24,8 +24,9 @@ public final class IntentExtractor {
             intent: "search" or "ask"
             Use search when they name a dish, cuisine, restaurant, budget, or ask for places.
             Use ask when the request is vague, such as "I'm hungry" or "somewhere nice".
-            A short follow-up such as "you can't find it?" or "yes" keeps the earlier dish and uses search.
-            Do not invent a dish they did not say.
+            Words such as fancy-looking, stylish, aesthetic, elegant, upscale, and beautiful interior are a mood. Leave budget empty unless they name a price, cheap, inexpensive, affordable, or expensive.
+            A follow-up such as "what can you find", "anything is fine", "show me alternatives", "you can't find it?", or "yes" keeps the earlier kind of place and area and uses search.
+            Do not invent a dish, cuisine, budget, or neighborhood they did not say.
             """;
 
     private final LLMEngine llm;
@@ -37,16 +38,17 @@ public final class IntentExtractor {
 
     public Intent extract(String message, List<FoodAgent.Turn> history) {
         String asked = message == null ? "" : message.trim();
+        Intent parsed = null;
         try {
             String reply = llm.complete(SYSTEM, List.of(Map.of("role", "user", "content", conversation(asked, history))));
-            Intent parsed = parse(reply);
-            if (parsed != null) {
-                return parsed;
-            }
+            parsed = parse(reply);
         } catch (RuntimeException ignored) {
             // The word rules below still decide search or ask.
         }
-        return fromRules(asked, history);
+        if (parsed == null) {
+            parsed = fromRules(asked, history);
+        }
+        return RequestSense.ground(parsed, asked, history);
     }
 
     private static String conversation(String asked, List<FoodAgent.Turn> history) {
@@ -92,8 +94,8 @@ public final class IntentExtractor {
     private Intent fromRules(String asked, List<FoodAgent.Turn> history) {
         String normal = FoodWords.normalize(asked);
         String source = asked;
-        if (continues(normal) || affirmation(normal)) {
-            String earlier = previousRequest(history);
+        if (RequestSense.reuseEarlier(asked)) {
+            String earlier = RequestSense.earlier(history);
             if (!earlier.isBlank()) {
                 source = earlier;
                 normal = FoodWords.normalize(source);
@@ -112,31 +114,13 @@ public final class IntentExtractor {
             return new Intent("", cuisine, budget, location.isBlank() ? "near me" : location, "search");
         }
         String dish = dishFrom(source);
-        if (vague(normal) && dish.isBlank() && cuisine.isBlank() && budget.isBlank()) {
+        if (RequestSense.vague(normal) && dish.isBlank() && cuisine.isBlank() && budget.isBlank()) {
             return Intent.ask();
         }
-        if (dish.isBlank() && cuisine.isBlank() && budget.isBlank() && !continues(FoodWords.normalize(asked))) {
+        if (dish.isBlank() && cuisine.isBlank() && budget.isBlank() && !RequestSense.continues(FoodWords.normalize(asked))) {
             return Intent.ask();
         }
         return new Intent(dish, cuisine, budget, location, "search");
-    }
-
-    private static String previousRequest(List<FoodAgent.Turn> history) {
-        if (history == null) {
-            return "";
-        }
-        for (int i = history.size() - 1; i >= 0; i--) {
-            FoodAgent.Turn turn = history.get(i);
-            if (!"user".equals(turn.role()) || turn.text() == null) {
-                continue;
-            }
-            String normal = FoodWords.normalize(turn.text());
-            if (vague(normal) || continues(normal) || affirmation(normal)) {
-                continue;
-            }
-            return turn.text().trim();
-        }
-        return "";
     }
 
     private static String dishFrom(String text) {
@@ -145,37 +129,6 @@ public final class IntentExtractor {
                 "\\b(any|some|a|an|the|restaurants?|places?|that|have|has|with|find|me|show|want|i|something|looking|for|near|nearby|you|it|of|to|do|can|could|please|just|food|eat|hungry|today|what|should|good)\\b",
                 " ");
         return normal.replaceAll("\\s+", " ").trim();
-    }
-
-    private static boolean vague(String normal) {
-        return normal.isBlank()
-                || normal.contains("i'm hungry")
-                || normal.contains("im hungry")
-                || normal.contains("i am hungry")
-                || normal.contains("what should i eat")
-                || normal.contains("somewhere nice")
-                || normal.contains("something nice")
-                || normal.contains("not sure");
-    }
-
-    private static boolean continues(String normal) {
-        return normal.contains("can't find")
-                || normal.contains("cant find")
-                || normal.contains("cannot find")
-                || normal.contains("try again")
-                || normal.contains("look again")
-                || normal.contains("search again");
-    }
-
-    private static boolean affirmation(String normal) {
-        return normal.equals("yes")
-                || normal.equals("yeah")
-                || normal.equals("yep")
-                || normal.equals("sure")
-                || normal.equals("ok")
-                || normal.equals("okay")
-                || normal.equals("please")
-                || normal.equals("go ahead");
     }
 
     private static String text(Map<String, Object> json, String key) {
@@ -206,10 +159,10 @@ public final class IntentExtractor {
             }
             return "$$$$";
         }
-        if (lower.contains("cheap") || lower.contains("budget") || lower.contains("inexpensive")) {
+        if (lower.contains("cheap") || lower.contains("budget") || lower.contains("inexpensive") || lower.contains("affordable")) {
             return "$";
         }
-        if (lower.contains("fine") || lower.contains("fancy") || lower.contains("expensive")) {
+        if (lower.contains("fine dining") || lower.contains("expensive")) {
             return "$$$";
         }
         return "";

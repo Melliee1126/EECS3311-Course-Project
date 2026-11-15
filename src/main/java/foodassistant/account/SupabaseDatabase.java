@@ -27,6 +27,7 @@ public final class SupabaseDatabase {
     private final String origin;
     private final String secret;
     private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(20)).build();
+    private int signalColumns = -1;
 
     private SupabaseDatabase(String origin, String secret) {
         this.origin = origin;
@@ -158,6 +159,63 @@ public final class SupabaseDatabase {
         request("DELETE", "friendships?" + eq("from_id", fromId) + "&" + eq("to_id", toId), null);
     }
 
+    public void insertInstant(String id, String accountId, String photo, String createdAt) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("id", id);
+        row.put("account_id", accountId);
+        row.put("photo", photo);
+        row.put("created_at", createdAt);
+        request("POST", "instants", Json.stringify(row));
+    }
+
+    public void insertReceipts(String instantId, List<String> recipients) {
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (String recipient : recipients) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("instant_id", instantId);
+            row.put("account_id", recipient);
+            rows.add(row);
+        }
+        request("POST", "instant_receipts", Json.stringify(rows));
+    }
+
+    public void deleteInstant(String id) {
+        request("DELETE", "instants?" + eq("id", id), null);
+    }
+
+    public List<String> instantIdsFor(String accountId) {
+        String json = request(
+                "GET",
+                "instant_receipts?select=instant_id&" + eq("account_id", accountId),
+                null);
+        Object parsed = Json.parse(json);
+        List<String> ids = new ArrayList<>();
+        if (!(parsed instanceof List<?> list)) {
+            return ids;
+        }
+        for (Object item : list) {
+            if (!(item instanceof Map<?, ?> map)) {
+                continue;
+            }
+            Object id = map.get("instant_id");
+            if (id instanceof String text && !text.isBlank()) {
+                ids.add(text);
+            }
+        }
+        return ids;
+    }
+
+    public List<InstantRow> instantsByIds(List<String> ids) {
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+        String json = request(
+                "GET",
+                "instants?select=id,account_id,photo,created_at&id=in.(" + String.join(",", ids) + ")&order=created_at.desc&limit=40",
+                null);
+        return instantRows(json);
+    }
+
     public String avatar(String accountId) {
         String json = request("GET", "avatars?select=photo&" + eq("account_id", accountId), null);
         Object parsed = Json.parse(json);
@@ -169,9 +227,13 @@ public final class SupabaseDatabase {
     }
 
     public UserPreferences taste(String accountId) {
+        boolean signals = signalColumns();
+        String columns = signals
+                ? "interests,likes,dislikes,price_comfort,description,stated,affinity"
+                : "interests,likes,dislikes,price_comfort,description";
         String json = request(
                 "GET",
-                "taste_profiles?select=interests,likes,dislikes,price_comfort,description&" + eq("account_id", accountId),
+                "taste_profiles?select=" + columns + "&" + eq("account_id", accountId),
                 null);
         Object parsed = Json.parse(json);
         if (!(parsed instanceof List<?> list) || list.isEmpty() || !(list.get(0) instanceof Map<?, ?> raw)) {
@@ -179,15 +241,26 @@ public final class SupabaseDatabase {
         }
         @SuppressWarnings("unchecked")
         Map<String, Object> map = (Map<String, Object>) raw;
+        if (!signals) {
+            return new UserPreferences(
+                    tags(map.get("interests")),
+                    tags(map.get("likes")),
+                    tags(map.get("dislikes")),
+                    text(map, "price_comfort"),
+                    text(map, "description"));
+        }
         return new UserPreferences(
                 tags(map.get("interests")),
                 tags(map.get("likes")),
                 tags(map.get("dislikes")),
                 text(map, "price_comfort"),
-                text(map, "description"));
+                text(map, "description"),
+                scoreMap(map.get("stated")),
+                scoreMap(map.get("affinity")));
     }
 
     public void saveTaste(String accountId, UserPreferences preferences) {
+        boolean signals = signalColumns();
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("account_id", accountId);
         row.put("interests", preferences.getInterests());
@@ -195,11 +268,57 @@ public final class SupabaseDatabase {
         row.put("dislikes", preferences.getDislikes());
         row.put("price_comfort", preferences.getPriceComfort());
         row.put("description", preferences.getDescription());
+        if (!signals) {
+            throw new IllegalStateException(
+                    "Supabase taste_profiles is missing stated and affinity. Run supabase/schema.sql.");
+        }
+        row.put("stated", preferences.getStated());
+        row.put("affinity", preferences.getAffinity());
         request(
                 "POST",
                 "taste_profiles?on_conflict=account_id",
                 Json.stringify(row),
                 "resolution=merge-duplicates,return=minimal");
+    }
+
+    private boolean signalColumns() {
+        if (signalColumns >= 0) {
+            return signalColumns == 1;
+        }
+        try {
+            request("GET", "taste_profiles?select=stated,affinity&limit=1", null);
+            signalColumns = 1;
+        } catch (RuntimeException exception) {
+            if (!missingSignalColumn(exception)) {
+                throw exception;
+            }
+            signalColumns = 0;
+        }
+        return signalColumns == 1;
+    }
+
+    private static boolean missingSignalColumn(RuntimeException exception) {
+        String message = exception.getMessage();
+        if (message == null) {
+            return false;
+        }
+        String lower = message.toLowerCase(java.util.Locale.ROOT);
+        return lower.contains("stated") || lower.contains("affinity") || lower.contains("column");
+    }
+
+    private static Map<String, Integer> scoreMap(Object value) {
+        if (value instanceof String text && !text.isBlank()) {
+            value = Json.parse(text);
+        }
+        Map<String, Integer> scores = new LinkedHashMap<>();
+        if (value instanceof Map<?, ?> map) {
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                if (entry.getKey() != null && entry.getValue() instanceof Number number) {
+                    scores.put(String.valueOf(entry.getKey()), number.intValue());
+                }
+            }
+        }
+        return scores;
     }
 
     public void saveAvatar(String accountId, String photo) {
@@ -337,7 +456,7 @@ public final class SupabaseDatabase {
         row.put("latitude", restaurant.hasLocation() ? restaurant.getLocation().getLatitude() : null);
         row.put("longitude", restaurant.hasLocation() ? restaurant.getLocation().getLongitude() : null);
         row.put("rating", restaurant.getRating());
-        row.put("price_range", restaurant.getPriceRange());
+        row.put("price_range", restaurant.storedPrice());
         row.put("status", restaurant.getStatus());
         row.put("tags", restaurant.getTags());
         row.put("position", position);
@@ -350,6 +469,7 @@ public final class SupabaseDatabase {
         String address = text(map, "address");
         Location location = latitude == null || longitude == null ? null : new Location(latitude, longitude, address);
         Double rating = number(map, "rating");
+        String[] price = Restaurant.splitStoredPrice(text(map, "price_range"));
         return new Restaurant(
                 text(map, "rest_id"),
                 text(map, "name"),
@@ -357,7 +477,8 @@ public final class SupabaseDatabase {
                 address,
                 location,
                 rating == null ? 0 : rating,
-                text(map, "price_range"),
+                price[0],
+                price[1],
                 tags(map.get("tags")),
                 text(map, "status").isBlank() ? "discovered" : text(map, "status"));
     }
@@ -527,6 +648,9 @@ public final class SupabaseDatabase {
     public record FriendLink(String fromId, String toId, String status) {
     }
 
+    public record InstantRow(String id, String accountId, String photo, String createdAt) {
+    }
+
     public record PublicReview(
             String id,
             String restaurant,
@@ -539,6 +663,27 @@ public final class SupabaseDatabase {
             List<String> tags,
             String photo,
             String createdAt) {
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<InstantRow> instantRows(String json) {
+        Object parsed = Json.parse(json);
+        List<InstantRow> rows = new ArrayList<>();
+        if (!(parsed instanceof List<?> list)) {
+            return rows;
+        }
+        for (Object item : list) {
+            if (!(item instanceof Map<?, ?> raw)) {
+                continue;
+            }
+            Map<String, Object> map = (Map<String, Object>) raw;
+            rows.add(new InstantRow(
+                    text(map, "id"),
+                    text(map, "account_id"),
+                    text(map, "photo"),
+                    text(map, "created_at")));
+        }
+        return rows;
     }
 
     @SuppressWarnings("unchecked")

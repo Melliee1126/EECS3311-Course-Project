@@ -10,6 +10,7 @@ import foodassistant.model.Restaurant;
 import foodassistant.model.UserPreferences;
 import foodassistant.places.PlacesSearch;
 import foodassistant.server.Json;
+import foodassistant.taste.ChatPreference;
 import foodassistant.taste.MemoryService;
 import foodassistant.taste.TasteProfileUpdater;
 
@@ -61,13 +62,25 @@ public final class FoodAgent {
         if (forYou) {
             intent = intent.asSearch();
         }
+        String focus = forYou ? asked : RequestSense.focus(asked, earlier);
+        ChatPreference.Reading reading = forYou ? ChatPreference.none() : ChatPreference.read(asked);
         MemoryService.Snapshot snapshot = memory.remember(accountId);
-        RecommendationRequest request = requestFrom(asked, intent, latitude, longitude);
+        if (!reading.stated().isEmpty() || !reading.cleared().isEmpty()) {
+            UserPreferences learned = TasteProfileUpdater.apply(
+                    snapshot.preferences(), reading.stated(), reading.cleared(), snapshot.reviews(), snapshot.saved());
+            if (accountId != null && !accountId.isBlank()) {
+                memory.updateMemory(accountId, learned);
+            }
+            snapshot = new MemoryService.Snapshot(learned, snapshot.saved(), snapshot.reviews());
+        }
+        intent = steer(intent, reading);
+        RecommendationRequest request = requestFrom(focus, intent, latitude, longitude);
+        String remembered = ChatPreference.note(reading);
         if (!intent.search()) {
-            String reply = responses.generate("ask", intent, request, snapshot, List.of(), earlier, false, false);
+            String reply = responses.generate("ask", intent, request, snapshot, List.of(), earlier, false, false, false, asked, remembered);
             return new Answer(reply, List.of(), snapshot.preferences());
         }
-        return getRecommendations(request, intent, latitude, longitude, forYou, snapshot, earlier);
+        return getRecommendations(request, intent, latitude, longitude, forYou, snapshot, earlier, asked, remembered, ChatPreference.rejected(reading));
     }
 
     public Answer getRecommendations(
@@ -77,20 +90,27 @@ public final class FoodAgent {
             double longitude,
             boolean forYou,
             MemoryService.Snapshot snapshot,
-            List<Turn> history) {
+            List<Turn> history,
+            String latest,
+            String remembered,
+            List<String> rejected) {
         UserPreferences taste = snapshot.preferences();
         UserPreferences rankingTaste = TasteProfileUpdater.overlay(taste, snapshot.saved());
         Map<String, String> photos = new LinkedHashMap<>();
-        Retrieved retrieved = retrieveRestaurants(intent, rankingTaste, latitude, longitude, forYou, photos);
+        Retrieved retrieved = retrieveRestaurants(intent, rankingTaste, latitude, longitude, forYou, photos, rejected);
         List<Restaurant> filtered = candidatesFilter.filter(retrieved.restaurants(), request.getConstraints());
+        filtered = withoutDisliked(filtered, taste, rejected);
         if (filtered.isEmpty()) {
-            String reply = responses.generate("none", intent, request, snapshot, List.of(), history, forYou, retrieved.budgetRelaxed());
+            String reply = responses.generate("none", intent, request, snapshot, List.of(), history, forYou, retrieved.budgetRelaxed(), retrieved.broadened(), latest, remembered);
             return new Answer(reply, List.of(), taste);
         }
         List<Recommendation> ranked = rankRestaurants(filtered, request, rankingTaste, latitude, longitude, forYou, photos);
+        if (!intent.style().isBlank()) {
+            ranked = preferAtmosphere(ranked);
+        }
         int keep = Math.min(5, ranked.size());
         List<Recommendation> top = List.copyOf(ranked.subList(0, keep));
-        String reply = responses.generate("recommend", intent, request, snapshot, top, history, forYou, retrieved.budgetRelaxed());
+        String reply = responses.generate("recommend", intent, request, snapshot, top, history, forYou, retrieved.budgetRelaxed(), retrieved.broadened(), latest, remembered);
         return new Answer(reply, top, taste);
     }
 
@@ -100,32 +120,53 @@ public final class FoodAgent {
             double latitude,
             double longitude,
             boolean forYou,
-            Map<String, String> photos) {
-        String text = searchText(intent, preferences, forYou);
+            Map<String, String> photos,
+            List<String> rejected) {
+        String text = withoutWords(withDiet(searchText(intent, preferences, forYou), preferences), rejected);
+        text = withoutWords(text, preferences.avoids());
+        String placeType = RequestSense.placeType(intent);
         List<String> levels = priceLevels(intent.budget());
         RuntimeException searchProblem = null;
         List<PlacesSearch.Hit> hits = List.of();
         boolean budgetRelaxed = false;
+        boolean broadened = false;
         try {
-            if (levels.isEmpty()) {
-                hits = places.search(text, latitude, longitude);
-            } else {
-                hits = places.search(text, latitude, longitude, levels);
-                if (hits.size() < 3) {
-                    budgetRelaxed = true;
-                    hits = merge(hits, places.search(text, latitude, longitude));
+            hits = searchPlaces(text, latitude, longitude, levels, placeType);
+            if (!levels.isEmpty() && hits.size() < 3) {
+                budgetRelaxed = true;
+                hits = merge(hits, searchPlaces(text, latitude, longitude, List.of(), placeType));
+            }
+            if (hits.isEmpty() && !"restaurant".equals(placeType)) {
+                List<PlacesSearch.Hit> widerType = places.search(text, latitude, longitude);
+                if (!widerType.isEmpty()) {
+                    hits = widerType;
+                    broadened = true;
+                }
+            }
+            if (hits.isEmpty()) {
+                String wider = widerQuery(intent, preferences, forYou, text);
+                if (!wider.equalsIgnoreCase(text)) {
+                    List<PlacesSearch.Hit> widerHits = places.search(wider, latitude, longitude);
+                    if (!widerHits.isEmpty()) {
+                        hits = widerHits;
+                        broadened = true;
+                    }
                 }
             }
         } catch (RuntimeException exception) {
-            if (!levels.isEmpty()) {
-                try {
-                    hits = places.search(text, latitude, longitude);
-                    budgetRelaxed = true;
-                } catch (RuntimeException second) {
-                    searchProblem = second;
+            try {
+                hits = places.search(text, latitude, longitude);
+                budgetRelaxed = !levels.isEmpty();
+                broadened = !"restaurant".equals(placeType) && !hits.isEmpty();
+                if (hits.isEmpty()) {
+                    String wider = widerQuery(intent, preferences, forYou, text);
+                    if (!wider.equalsIgnoreCase(text)) {
+                        hits = places.search(wider, latitude, longitude);
+                        broadened = !hits.isEmpty();
+                    }
                 }
-            } else {
-                searchProblem = exception;
+            } catch (RuntimeException second) {
+                searchProblem = second;
             }
         }
         Map<String, Restaurant> byId = new LinkedHashMap<>();
@@ -137,7 +178,65 @@ public final class FoodAgent {
         if (byId.isEmpty() && searchProblem != null) {
             throw searchProblem;
         }
-        return new Retrieved(new ArrayList<>(byId.values()), budgetRelaxed);
+        return new Retrieved(new ArrayList<>(byId.values()), budgetRelaxed, broadened);
+    }
+
+    private List<PlacesSearch.Hit> searchPlaces(
+            String text,
+            double latitude,
+            double longitude,
+            List<String> levels,
+            String placeType) {
+        if (levels.isEmpty()) {
+            return places.search(text, latitude, longitude, List.of(), placeType);
+        }
+        return places.search(text, latitude, longitude, levels, placeType);
+    }
+
+    private static String widerQuery(Intent intent, UserPreferences preferences, boolean forYou, String first) {
+        if (forYou || (intent.dish().isBlank() && intent.cuisine().isBlank())) {
+            return first;
+        }
+        if (intent.location().isBlank() || "near me".equalsIgnoreCase(intent.location())) {
+            return first;
+        }
+        Intent kept = new Intent(intent.dish(), intent.cuisine(), intent.budget(), "", intent.intent(), intent.style());
+        String wider = searchText(kept, preferences, false);
+        if (wider.equalsIgnoreCase(first) || "restaurants".equalsIgnoreCase(wider)) {
+            return first;
+        }
+        return wider;
+    }
+
+    private static List<Recommendation> preferAtmosphere(List<Recommendation> ranked) {
+        List<Recommendation> adjusted = new ArrayList<>();
+        for (Recommendation recommendation : ranked) {
+            Restaurant restaurant = recommendation.getRestaurant();
+            double bonus = 0;
+            int level = restaurant.getPriceRange() == null ? 0 : restaurant.getPriceRange().length();
+            if (level >= 3) {
+                bonus += 1.2;
+            } else if (level == 2) {
+                bonus += 0.4;
+            }
+            if (restaurant.getRating() >= 4.5) {
+                bonus += 0.8;
+            }
+            adjusted.add(new Recommendation(
+                    restaurant,
+                    recommendation.getPhoto(),
+                    recommendation.getScore() + bonus,
+                    recommendation.getExplanation(),
+                    recommendation.getMatchReasons()));
+        }
+        adjusted.sort((left, right) -> {
+            int byScore = Double.compare(right.getScore(), left.getScore());
+            if (byScore != 0) {
+                return byScore;
+            }
+            return left.getRestaurant().getName().compareToIgnoreCase(right.getRestaurant().getName());
+        });
+        return adjusted;
     }
 
     private static List<PlacesSearch.Hit> merge(List<PlacesSearch.Hit> first, List<PlacesSearch.Hit> second) {
@@ -191,7 +290,161 @@ public final class FoodAgent {
                 recommendations,
                 List.of(),
                 forYou,
-                false);
+                false,
+                false,
+                "",
+                "");
+    }
+
+    private static Intent steer(Intent intent, ChatPreference.Reading reading) {
+        List<String> rejected = ChatPreference.rejected(reading);
+        if (rejected.isEmpty()) {
+            return intent;
+        }
+        String cuisine = keepFoods(intent.cuisine(), rejected);
+        String dish = stripFoods(intent.dish(), rejected);
+        dish = stripPreferenceWords(dish);
+        if (cuisine.isBlank() && dish.isBlank() && intent.budget().isBlank() && intent.location().isBlank()) {
+            return new Intent("", "", "", "", "search", intent.style());
+        }
+        return new Intent(dish, cuisine, intent.budget(), intent.location(), "search", intent.style());
+    }
+
+    private static String keepFoods(String text, List<String> rejected) {
+        List<String> kept = new ArrayList<>();
+        for (String word : FoodWords.mentioned(text)) {
+            if (!listed(rejected, word)) {
+                kept.add(word);
+            }
+        }
+        return String.join(" ", kept);
+    }
+
+    private static String stripFoods(String text, List<String> rejected) {
+        String remaining = " " + FoodWords.normalize(text) + " ";
+        for (String word : rejected) {
+            remaining = remaining.replace(" " + FoodWords.normalize(word) + " ", " ");
+        }
+        return remaining.replaceAll("\\s+", " ").trim();
+    }
+
+    private static String stripPreferenceWords(String dish) {
+        if (dish.isBlank() || !FoodWords.mentioned(dish).isEmpty()) {
+            return dish;
+        }
+        String cleaned = dish.replaceAll(
+                "\\b(absolutely|really|truly|love|loved|like|liked|hate|hated|adore|enjoy|enjoyed|prefer|preferred|dislike|disliked|favorite|favourite|obsessed|allergic|avoid|stand|want|wanted|mildly|kinda|fan|into|never|always|usually|dont|not|no)\\b",
+                " ");
+        cleaned = cleaned.replaceAll("\\s+", " ").trim();
+        return cleaned.length() < 3 ? "" : cleaned;
+    }
+
+    private static List<Restaurant> withoutDisliked(
+            List<Restaurant> restaurants,
+            UserPreferences preferences,
+            List<String> rejected) {
+        List<String> blocked = new ArrayList<>(preferences.getDislikes());
+        for (String avoid : preferences.avoids()) {
+            if (!listed(blocked, avoid)) {
+                blocked.add(avoid);
+            }
+        }
+        if (rejected != null) {
+            for (String word : rejected) {
+                if (!listed(blocked, word)) {
+                    blocked.add(word);
+                }
+            }
+        }
+        if (restaurants.isEmpty() || blocked.isEmpty()) {
+            return restaurants;
+        }
+        List<Restaurant> kept = new ArrayList<>();
+        for (Restaurant restaurant : restaurants) {
+            boolean skip = false;
+            for (String dislike : blocked) {
+                if (RestaurantMatch.matches(restaurant, dislike)) {
+                    skip = true;
+                    break;
+                }
+            }
+            if (!skip) {
+                kept.add(restaurant);
+            }
+        }
+        return kept;
+    }
+
+    private static String withoutWords(String text, List<String> rejected) {
+        if (rejected == null || rejected.isEmpty() || text == null || text.isBlank()) {
+            return text;
+        }
+        String remaining = " " + FoodWords.normalize(text) + " ";
+        for (String word : rejected) {
+            remaining = remaining.replace(" " + FoodWords.normalize(word) + " ", " ");
+        }
+        remaining = remaining.replaceAll("\\s+", " ").trim();
+        if (remaining.isBlank() || remaining.equals("restaurants")) {
+            return "restaurants";
+        }
+        return remaining.endsWith("restaurants") ? remaining : remaining + " restaurants";
+    }
+
+    private static String withDiet(String query, UserPreferences preferences) {
+        List<String> diets = preferences.diets();
+        if (diets.isEmpty() || query == null || query.isBlank()) {
+            return query;
+        }
+        String lower = " " + FoodWords.normalize(query) + " ";
+        List<String> extra = new ArrayList<>();
+        for (String diet : diets) {
+            String normal = FoodWords.normalize(diet);
+            if (!lower.contains(" " + normal + " ")) {
+                extra.add(normal);
+            }
+        }
+        if (extra.isEmpty()) {
+            return query;
+        }
+        String addition = String.join(" ", extra);
+        String base = query.trim();
+        if (base.toLowerCase(java.util.Locale.ROOT).endsWith(" restaurants")) {
+            base = base.substring(0, base.length() - " restaurants".length()).trim();
+        }
+        if (base.isBlank() || base.equalsIgnoreCase("restaurants")) {
+            return addition + " restaurants";
+        }
+        return base + " " + addition + " restaurants";
+    }
+
+    private static String preferredFoods(UserPreferences preferences) {
+        List<String> foods = new ArrayList<>();
+        for (String interest : preferences.getInterests()) {
+            if (!listed(preferences.getDislikes(), interest)) {
+                foods.add(interest);
+            }
+            if (foods.size() == 3) {
+                break;
+            }
+        }
+        if (foods.isEmpty()) {
+            for (String like : preferences.getLikes()) {
+                if (!listed(preferences.getDislikes(), like)) {
+                    foods.add(like);
+                    break;
+                }
+            }
+        }
+        return String.join(" ", foods);
+    }
+
+    private static boolean listed(List<String> values, String word) {
+        for (String value : values) {
+            if (value.equalsIgnoreCase(word)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static RecommendationRequest requestFrom(String asked, Intent intent, double latitude, double longitude) {
@@ -200,8 +453,8 @@ public final class FoodAgent {
             constraints.add(new Constraint(Constraint.BUDGET, intent.budget(), 1));
         }
         for (String word : FoodWords.mentioned(intent.cuisine())) {
-            String type = dietary(word) ? Constraint.DIETARY : Constraint.CUISINE;
-            constraints.add(new Constraint(type, word, dietary(word) ? 1 : 2));
+            String type = FoodWords.isDiet(word) ? Constraint.DIETARY : Constraint.CUISINE;
+            constraints.add(new Constraint(type, word, FoodWords.isDiet(word) ? 1 : 2));
         }
         boolean near = "near me".equalsIgnoreCase(intent.location())
                 || intent.location().toLowerCase(java.util.Locale.ROOT).contains("nearby");
@@ -234,12 +487,11 @@ public final class FoodAgent {
                 query.append(' ').append(intent.location());
             }
         }
-        if (query.isEmpty() && !preferences.getInterests().isEmpty()) {
-            int count = Math.min(3, preferences.getInterests().size());
-            return String.join(" ", preferences.getInterests().subList(0, count)) + " restaurants";
-        }
-        if (query.isEmpty() && !preferences.getLikes().isEmpty()) {
-            return preferences.getLikes().get(0) + " restaurants";
+        if (query.isEmpty()) {
+            String tastes = preferredFoods(preferences);
+            if (!tastes.isBlank()) {
+                return tastes + " restaurants";
+            }
         }
         if (query.isEmpty()) {
             return "restaurants";
@@ -260,15 +512,7 @@ public final class FoodAgent {
         };
     }
 
-    private static boolean dietary(String word) {
-        String normal = FoodWords.normalize(word);
-        return normal.equals("vegan")
-                || normal.equals("vegetarian")
-                || normal.equals("halal")
-                || normal.equals("gluten free");
-    }
-
-    private record Retrieved(List<Restaurant> restaurants, boolean budgetRelaxed) {
+    private record Retrieved(List<Restaurant> restaurants, boolean budgetRelaxed, boolean broadened) {
     }
 
     public static String response(Answer answer) {
@@ -292,8 +536,11 @@ public final class FoodAgent {
         taste.put("interests", preferences.getInterests());
         taste.put("likes", preferences.getLikes());
         taste.put("dislikes", preferences.getDislikes());
+        taste.put("diet", preferences.diets());
+        taste.put("avoids", preferences.avoids());
         taste.put("priceComfort", preferences.getPriceComfort());
         taste.put("description", preferences.getDescription());
+        taste.put("affinity", preferences.getAffinity());
         return taste;
     }
 
@@ -308,6 +555,7 @@ public final class FoodAgent {
         row.put("longitude", restaurant.hasLocation() ? restaurant.getLocation().getLongitude() : null);
         row.put("rating", restaurant.getRating());
         row.put("priceRange", restaurant.getPriceRange());
+        row.put("priceSpan", restaurant.getPriceSpan());
         row.put("status", restaurant.getStatus());
         row.put("tags", restaurant.getTags());
         row.put("photo", recommendation.getPhoto());

@@ -10,6 +10,8 @@ type Props = {
   userPosition: LatLng | null
   collections: Collection[]
   signedIn: boolean
+  docked?: boolean
+  onClose: () => void
   onToggleCollection: (collectionId: string) => void
   onRequestCreate: () => void
   onSignIn: () => void
@@ -20,6 +22,8 @@ export function PlaceDetail({
   userPosition,
   collections,
   signedIn,
+  docked = false,
+  onClose,
   onToggleCollection,
   onRequestCreate,
   onSignIn,
@@ -31,9 +35,10 @@ export function PlaceDetail({
       : null
   const score = Math.max(0, Math.min(5, restaurant.rating))
   const memberIds = placeCollectionIds(collections, restaurant.restId)
+  const price = restaurant.priceSpan?.trim() || restaurant.priceRange
 
   return (
-    <section className="place-detail" aria-label={restaurant.name}>
+    <section className={docked ? 'place-detail docked' : 'place-detail'} aria-label={restaurant.name}>
       {restaurant.photo ? (
         <img className="place-photo" src={restaurant.photo} alt="" />
       ) : (
@@ -42,6 +47,7 @@ export function PlaceDetail({
       <div className="place-copy">
         <h2 className="place-name">{restaurant.name}</h2>
         {restaurant.address && <p className="place-address">{restaurant.address}</p>}
+        {price && <p className="place-price">{price}</p>}
         <div className="place-meta">
           {distance != null && (
             <p className="place-distance">
@@ -52,22 +58,27 @@ export function PlaceDetail({
           <Stars score={score} />
         </div>
       </div>
-      <button
-        type="button"
-        className="place-bookmark"
-        aria-label="Collections"
-        aria-pressed={memberIds.length > 0}
-        aria-expanded={menuOpen}
-        onClick={() => {
-          if (!signedIn) {
-            onSignIn()
-            return
-          }
-          setMenuOpen((open) => !open)
-        }}
-      >
-        <BookmarkIcon />
-      </button>
+      <div className="place-side">
+        <button type="button" className="place-close" aria-label="Close" onClick={onClose}>
+          <CloseIcon />
+        </button>
+        <button
+          type="button"
+          className="place-bookmark"
+          aria-label="Collections"
+          aria-pressed={memberIds.length > 0}
+          aria-expanded={menuOpen}
+          onClick={() => {
+            if (!signedIn) {
+              onSignIn()
+              return
+            }
+            setMenuOpen((open) => !open)
+          }}
+        >
+          <BookmarkIcon />
+        </button>
+      </div>
       {menuOpen && (
         <CollectionMenu
           collections={collections}
@@ -78,6 +89,14 @@ export function PlaceDetail({
         />
       )}
     </section>
+  )
+}
+
+function CloseIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M7 7l10 10M17 7 7 17" />
+    </svg>
   )
 }
 

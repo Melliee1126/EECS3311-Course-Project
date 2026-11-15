@@ -21,8 +21,20 @@ type Props = {
   onSignOut: () => void
   learnedLikes: string[]
   learnedDislikes: string[]
+  learnedDiet: string[]
+  learnedAvoids: string[]
+  learnedAffinity: Record<string, number>
   priceComfort: string
   onTaste: (interests: string[], description: string) => void
+}
+
+function withStrength(food: string, affinity: Record<string, number>) {
+  const score = affinity[food]
+  if (score == null || score === 0) return food
+  const magnitude = Math.abs(score)
+  if (magnitude >= 3) return `${food} (strong)`
+  if (magnitude === 1) return `${food} (mild)`
+  return food
 }
 
 export function AccountPanel({
@@ -41,6 +53,9 @@ export function AccountPanel({
   onSignOut,
   learnedLikes,
   learnedDislikes,
+  learnedDiet,
+  learnedAvoids,
+  learnedAffinity,
   priceComfort,
   onTaste,
 }: Props) {
@@ -67,6 +82,9 @@ export function AccountPanel({
         onSignOut={onSignOut}
         learnedLikes={learnedLikes}
         learnedDislikes={learnedDislikes}
+        learnedDiet={learnedDiet}
+        learnedAvoids={learnedAvoids}
+        learnedAffinity={learnedAffinity}
         priceComfort={priceComfort}
         onTaste={onTaste}
       />
@@ -266,6 +284,9 @@ function Profile({
   onSignOut,
   learnedLikes,
   learnedDislikes,
+  learnedDiet,
+  learnedAvoids,
+  learnedAffinity,
   priceComfort,
   onTaste,
 }: {
@@ -277,6 +298,9 @@ function Profile({
   onSignOut: () => void
   learnedLikes: string[]
   learnedDislikes: string[]
+  learnedDiet: string[]
+  learnedAvoids: string[]
+  learnedAffinity: Record<string, number>
   priceComfort: string
   onTaste: (interests: string[], description: string) => void
 }) {
@@ -475,10 +499,16 @@ function Profile({
         </div>
       )}
       {interestError && <p className="library-error">{interestError}</p>}
-      {(learnedLikes.length > 0 || learnedDislikes.length > 0 || priceComfort) && (
+      {(learnedDiet.length > 0 || learnedAvoids.length > 0 || learnedLikes.length > 0 || learnedDislikes.length > 0 || priceComfort) && (
         <div className="profile-learned">
-          {learnedLikes.length > 0 && <p>Learned from your reviews: {learnedLikes.join(', ')}</p>}
-          {learnedDislikes.length > 0 && <p>Less of: {learnedDislikes.join(', ')}</p>}
+          {learnedDiet.length > 0 && <p>Diet: {learnedDiet.join(', ')}</p>}
+          {learnedAvoids.length > 0 && <p>Avoids: {learnedAvoids.join(', ')}</p>}
+          {learnedLikes.some((food) => !learnedDiet.includes(food)) && (
+            <p>Likes: {learnedLikes.filter((food) => !learnedDiet.includes(food)).map((food) => withStrength(food, learnedAffinity)).join(', ')}</p>
+          )}
+          {learnedDislikes.some((food) => !learnedAvoids.includes(food)) && (
+            <p>Less of: {learnedDislikes.filter((food) => !learnedAvoids.includes(food)).map((food) => withStrength(food, learnedAffinity)).join(', ')}</p>
+          )}
           {priceComfort && <p>Usual budget: {priceComfort}</p>}
         </div>
       )}

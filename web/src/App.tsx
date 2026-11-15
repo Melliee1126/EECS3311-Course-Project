@@ -15,6 +15,7 @@ import { Sidebar } from './components/Sidebar'
 import { useCollections } from './collections'
 import { ReviewPanel } from './components/ReviewPanel'
 import { FriendsPanel, type Friend, type FriendLookup, type FriendPost, type FriendRequest, type FoundFriend } from './components/FriendsPanel'
+import { InstantPanel } from './components/InstantPanel'
 import { useProfileExtra, readProfileExtra, writeProfileExtra } from './profileExtra'
 import { useReviews } from './reviews'
 import { placesFailureMessage, searchRestaurants } from './places'
@@ -30,8 +31,11 @@ const EMPTY_TASTE: TasteSnapshot = {
   interests: [],
   likes: [],
   dislikes: [],
+  diet: [],
+  avoids: [],
   priceComfort: '',
   description: '',
+  affinity: {},
 }
 
 type PlaceSearch = {
@@ -74,6 +78,7 @@ function FoodApp() {
   const [accountNotice, setAccountNotice] = useState<string | null>(null)
   const [reviewOpen, setReviewOpen] = useState(false)
   const [friendsOpen, setFriendsOpen] = useState(false)
+  const [instantOpen, setInstantOpen] = useState(false)
   const [friends, setFriends] = useState<Friend[]>([])
   const [incoming, setIncoming] = useState<FriendRequest[]>([])
   const [outgoing, setOutgoing] = useState<FriendRequest[]>([])
@@ -82,7 +87,6 @@ function FoodApp() {
   const [sessions, setSessions] = useState<ChatSession[]>(NO_SESSIONS)
   const [activeId, setActiveId] = useState<string | null>(null)
   const [assistantBusy, setAssistantBusy] = useState(false)
-  const [assistantMode, setAssistantMode] = useState<'chat' | 'for-you' | null>(null)
   const [learned, setLearned] = useState<TasteSnapshot>(EMPTY_TASTE)
   const accountApi = useAccount()
   const profileExtra = useProfileExtra(accountApi.account?.id ?? null)
@@ -115,7 +119,6 @@ function FoodApp() {
   useEffect(() => {
     setActiveId(null)
     setThread([])
-    setAssistantMode(null)
     setSessions(accountId ? loadChatSessions(accountId) : NO_SESSIONS)
   }, [accountId])
 
@@ -223,6 +226,7 @@ function FoodApp() {
     !friendsOpen &&
     !accountOpen &&
     !reviewOpen &&
+    !instantOpen &&
     recommendationPlaces.length > 0
   const mapPlaces = searching ? results : recommending ? recommendationPlaces : viewed
   const pins =
@@ -254,6 +258,7 @@ function FoodApp() {
     setCreateOpen(false)
     setReviewOpen(false)
     setFriendsOpen(false)
+    setInstantOpen(false)
   }
 
   function requireAccount() {
@@ -267,6 +272,7 @@ function FoodApp() {
     setAccountOpen(false)
     setReviewOpen(false)
     setFriendsOpen(false)
+    setInstantOpen(false)
     if (libraryOpen && activeCollectionId == null) {
       setLibraryOpen(false)
       return
@@ -285,6 +291,7 @@ function FoodApp() {
     setAccountOpen(false)
     setCreateOpen(false)
     setFriendsOpen(false)
+    setInstantOpen(false)
   }
 
   useEffect(() => {
@@ -295,7 +302,7 @@ function FoodApp() {
       setFriendPosts([])
       return
     }
-    if (!friendsOpen) return
+    if (!friendsOpen && !instantOpen) return
     const gate = { ok: true }
     void fetch('/api/friends', {
       headers: { Authorization: `Bearer ${accountApi.token}` },
@@ -309,7 +316,7 @@ function FoodApp() {
     return () => {
       gate.ok = false
     }
-  }, [accountApi.token, friendsOpen])
+  }, [accountApi.token, friendsOpen, instantOpen])
 
   async function lookupFriend(email: string): Promise<FriendLookup> {
     return friendRequest('/api/accounts/lookup', accountApi.token, { email })
@@ -378,6 +385,21 @@ function FoodApp() {
     setAccountNotice(null)
     setReviewOpen(false)
     setCreateOpen(false)
+    setInstantOpen(false)
+  }
+
+  function toggleInstant() {
+    if (instantOpen) {
+      setInstantOpen(false)
+      return
+    }
+    setInstantOpen(true)
+    setLibraryOpen(false)
+    setAccountOpen(false)
+    setAccountNotice(null)
+    setReviewOpen(false)
+    setFriendsOpen(false)
+    setCreateOpen(false)
   }
 
   function toggleProfile() {
@@ -415,12 +437,9 @@ function FoodApp() {
         setThread((current) => [...current, { role: 'assistant', text: answer.reply, picks: answer.recommendations }])
         setLearned(answer.taste)
         if (answer.recommendations.length > 0) {
-          setAssistantMode(forYou ? 'for-you' : 'chat')
           setQuery('')
           setListOpen(false)
           setSelected(null)
-        } else {
-          setAssistantMode(null)
         }
       })
       .catch((askError: unknown) => {
@@ -436,17 +455,14 @@ function FoodApp() {
   function newChat() {
     setActiveId(null)
     setThread([])
-    setAssistantMode(null)
     setSelected(null)
   }
 
   function openSession(id: string) {
     const session = sessions.find((item) => item.id === id)
     if (!session) return
-    const picks = [...session.messages].reverse().find((message) => message.role === 'assistant')?.picks ?? []
     setActiveId(id)
     setThread(session.messages)
-    setAssistantMode(picks.length > 0 ? 'chat' : null)
     setQuery('')
     setListOpen(false)
     setSelected(null)
@@ -468,16 +484,16 @@ function FoodApp() {
         lockToResults={searching || viewed.length > 0 || selected != null || recommending}
         userPosition={userPosition}
         onSelect={chooseRestaurant}
-        covered={friendsOpen}
+        covered={friendsOpen || instantOpen}
       />
       <Sidebar
         libraryOpen={libraryOpen}
         accountOpen={accountOpen}
         reviewOpen={reviewOpen}
         friendsOpen={friendsOpen}
-        forYouActive={assistantMode === 'for-you' && recommending}
+        instantOpen={instantOpen}
         avatar={profileExtra.avatar}
-        onForYou={() => ask('', [], true)}
+        onInstant={toggleInstant}
         onSaved={openSaved}
         onCreate={toggleReview}
         onFriends={toggleFriends}
@@ -503,8 +519,8 @@ function FoodApp() {
           onSelect={chooseRestaurant}
         />
       )}
-      {!friendsOpen && <SearchBar query={query} onQueryChange={changeQuery} />}
-      {!friendsOpen && (
+      {!friendsOpen && !instantOpen && <SearchBar query={query} onQueryChange={changeQuery} />}
+      {!friendsOpen && !instantOpen && (
         <RestaurantCard
           restaurants={results}
           query={query}
@@ -514,32 +530,57 @@ function FoodApp() {
           onSelect={chooseRestaurant}
         />
       )}
-      {recommending && (
-        <RecommendationRow
-          places={recommendationPlaces}
-          selectedId={selected?.restId ?? null}
-          raised={selected != null}
-          onSelect={chooseRestaurant}
-        />
+      {recommending ? (
+        <div className="suggestion-dock">
+          {selected && !friendsOpen && !instantOpen && (
+            <PlaceDetail
+              key={selected.restId}
+              restaurant={selected}
+              userPosition={userPosition}
+              collections={collectionsApi.collections}
+              signedIn={accountApi.account != null}
+              docked
+              onClose={() => setSelected(null)}
+              onToggleCollection={(collectionId) =>
+                collectionsApi.toggleInCollection(collectionId, selected)
+              }
+              onRequestCreate={() => {
+                setCreatePlace(selected)
+                setCreateOpen(true)
+              }}
+              onSignIn={() => openAccount('Sign in to keep your own collections.')}
+            />
+          )}
+          <RecommendationRow
+            places={recommendationPlaces}
+            selectedId={selected?.restId ?? null}
+            docked
+            onSelect={chooseRestaurant}
+          />
+        </div>
+      ) : (
+        selected &&
+        !friendsOpen &&
+        !instantOpen && (
+          <PlaceDetail
+            key={selected.restId}
+            restaurant={selected}
+            userPosition={userPosition}
+            collections={collectionsApi.collections}
+            signedIn={accountApi.account != null}
+            onClose={() => setSelected(null)}
+            onToggleCollection={(collectionId) =>
+              collectionsApi.toggleInCollection(collectionId, selected)
+            }
+            onRequestCreate={() => {
+              setCreatePlace(selected)
+              setCreateOpen(true)
+            }}
+            onSignIn={() => openAccount('Sign in to keep your own collections.')}
+          />
+        )
       )}
-      {selected && !friendsOpen && (
-        <PlaceDetail
-          key={selected.restId}
-          restaurant={selected}
-          userPosition={userPosition}
-          collections={collectionsApi.collections}
-          signedIn={accountApi.account != null}
-          onToggleCollection={(collectionId) =>
-            collectionsApi.toggleInCollection(collectionId, selected)
-          }
-          onRequestCreate={() => {
-            setCreatePlace(selected)
-            setCreateOpen(true)
-          }}
-          onSignIn={() => openAccount('Sign in to keep your own collections.')}
-        />
-      )}
-      {!libraryOpen && !accountOpen && !reviewOpen && !friendsOpen && (
+      {!libraryOpen && !accountOpen && !reviewOpen && !friendsOpen && !instantOpen && (
         <ChatCard
           thread={thread}
           busy={assistantBusy}
@@ -547,8 +588,18 @@ function FoodApp() {
           sessions={sessions}
           activeSessionId={activeId}
           onSend={(message, chips) => ask(message, chips, false)}
+          onForYou={() => ask('', [], true)}
           onOpenSession={openSession}
           onNewChat={newChat}
+        />
+      )}
+      {instantOpen && (
+        <InstantPanel
+          friends={friends}
+          token={accountApi.token}
+          signedIn={accountApi.account != null}
+          position={userPosition}
+          onSignIn={() => openAccount('Sign in to send an instant.')}
         />
       )}
       {friendsOpen && (
@@ -602,6 +653,9 @@ function FoodApp() {
           onSignOut={accountApi.signOut}
           learnedLikes={learned.likes}
           learnedDislikes={learned.dislikes}
+          learnedDiet={learned.diet}
+          learnedAvoids={learned.avoids}
+          learnedAffinity={learned.affinity}
           priceComfort={learned.priceComfort}
           onTaste={saveProfileTaste}
         />
