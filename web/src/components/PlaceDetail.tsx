@@ -1,9 +1,9 @@
 import { useState, type CSSProperties } from 'react'
 import { placeCollectionIds, type Collection } from '../collections'
-import type { Restaurant } from '../restaurants'
-import { hasLocation } from '../restaurants'
+import { hasLocation, visibleTags, type Restaurant } from '../restaurants'
 import { distanceKm, type LatLng } from '../userLocation'
 import { CollectionMenu } from './CollectionMenu'
+import { TagList } from './TagList'
 
 type Props = {
   restaurant: Restaurant
@@ -48,6 +48,7 @@ export function PlaceDetail({
         <h2 className="place-name">{restaurant.name}</h2>
         {restaurant.address && <p className="place-address">{restaurant.address}</p>}
         {price && <p className="place-price">{price}</p>}
+        <TagList tags={visibleTags(restaurant)} />
         <div className="place-meta">
           {distance != null && (
             <p className="place-distance">

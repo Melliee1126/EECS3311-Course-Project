@@ -4,6 +4,7 @@ import foodassistant.account.SupabaseDatabase;
 import foodassistant.model.Collection;
 import foodassistant.model.Location;
 import foodassistant.model.Restaurant;
+import foodassistant.places.PlaceTags;
 import foodassistant.server.Json;
 
 import java.util.ArrayList;
@@ -191,7 +192,7 @@ public final class CollectionLibrary {
                 number(map, "rating") == null ? 0 : number(map, "rating"),
                 text(map, "priceRange"),
                 text(map, "priceSpan"),
-                strings(map.get("tags")),
+                PlaceTags.keep(name, strings(map.get("tags"))),
                 text(map, "status").isBlank() ? "discovered" : text(map, "status"));
     }
 

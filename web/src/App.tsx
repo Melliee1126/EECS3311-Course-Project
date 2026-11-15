@@ -5,7 +5,7 @@ import { askAssistant, readTaste, saveTaste, type SuggestedRestaurant, type Tast
 import { AccountPanel } from './components/AccountPanel'
 import { ChatCard, type ChatMessage } from './components/ChatCard'
 import { RecommendationRow } from './components/RecommendationRow'
-import { loadChatSessions, saveChatSessions, type ChatSession } from './chatHistory'
+import { loadChatSessions, saveChatSessions, sessionPicks, type ChatSession } from './chatHistory'
 import { CollectionsPanel, CreateCollectionDialog } from './components/CollectionsPanel'
 import { MapBackground } from './components/MapBackground'
 import { PlaceDetail } from './components/PlaceDetail'
@@ -86,6 +86,7 @@ function FoodApp() {
   const [thread, setThread] = useState<ChatMessage[]>([])
   const [sessions, setSessions] = useState<ChatSession[]>(NO_SESSIONS)
   const [activeId, setActiveId] = useState<string | null>(null)
+  const [recalled, setRecalled] = useState<SuggestedRestaurant[] | null>(null)
   const [assistantBusy, setAssistantBusy] = useState(false)
   const [learned, setLearned] = useState<TasteSnapshot>(EMPTY_TASTE)
   const accountApi = useAccount()
@@ -219,7 +220,7 @@ function FoodApp() {
     (collection) => collection.id === activeCollectionId,
   )
   const viewed = activeCollection?.places ?? []
-  const recommendationPlaces = latestAssistantPicks(thread)
+  const recommendationPlaces = recalled ?? latestAssistantPicks(thread)
   const recommending =
     !searching &&
     !libraryOpen &&
@@ -238,6 +239,7 @@ function FoodApp() {
     setQuery(next)
     setSelected(null)
     setListOpen(next.trim().length >= 2)
+    if (next.trim()) setRecalled(null)
   }
 
   function chooseRestaurant(restId: string) {
@@ -249,6 +251,18 @@ function FoodApp() {
     if (!restaurant) return
     setSelected(restaurant)
     setListOpen(false)
+  }
+
+  function showHome() {
+    setLibraryOpen(false)
+    setActiveCollectionId(null)
+    setAccountOpen(false)
+    setAccountNotice(null)
+    setReviewOpen(false)
+    setFriendsOpen(false)
+    setInstantOpen(false)
+    setCreateOpen(false)
+    setCreatePlace(null)
   }
 
   function openAccount(notice: string | null) {
@@ -428,6 +442,7 @@ function FoodApp() {
     const shown = forYou ? 'For you' : [message, ...chips].filter(Boolean).join(' · ')
     const history = thread.slice(-8).map((turn) => ({ role: turn.role, text: turn.text }))
     if (activeId == null) setActiveId(crypto.randomUUID())
+    setRecalled(null)
     setThread((current) => [...current, { role: 'user', text: shown, picks: [] }])
     setAssistantBusy(true)
     const bias = positionRef.current ?? TORONTO
@@ -455,6 +470,7 @@ function FoodApp() {
   function newChat() {
     setActiveId(null)
     setThread([])
+    setRecalled(null)
     setSelected(null)
   }
 
@@ -463,9 +479,31 @@ function FoodApp() {
     if (!session) return
     setActiveId(id)
     setThread(session.messages)
+    setRecalled(null)
     setQuery('')
     setListOpen(false)
     setSelected(null)
+  }
+
+  function showRecalled(id: string, restId: string) {
+    const session = sessions.find((item) => item.id === id)
+    if (!session) return
+    const places = sessionPicks(session.messages)
+    const place = places.find((item) => item.restId === restId)
+    if (!place) return
+    setActiveId(id)
+    setThread(session.messages)
+    setRecalled(places)
+    setLibraryOpen(false)
+    setAccountOpen(false)
+    setReviewOpen(false)
+    setFriendsOpen(false)
+    setInstantOpen(false)
+    setActiveCollectionId(null)
+    setCreateOpen(false)
+    setQuery('')
+    setListOpen(false)
+    setSelected(place)
   }
 
   function saveProfileTaste(interests: string[], description: string) {
@@ -493,6 +531,7 @@ function FoodApp() {
         friendsOpen={friendsOpen}
         instantOpen={instantOpen}
         avatar={profileExtra.avatar}
+        onHome={showHome}
         onInstant={toggleInstant}
         onSaved={openSaved}
         onCreate={toggleReview}
@@ -585,17 +624,28 @@ function FoodApp() {
           thread={thread}
           busy={assistantBusy}
           signedIn={accountApi.account != null}
-          sessions={sessions}
+          sessions={sessions.map((session) => ({
+            id: session.id,
+            title: session.title,
+            updatedAt: session.updatedAt,
+            places: sessionPicks(session.messages),
+          }))}
           activeSessionId={activeId}
           onSend={(message, chips) => ask(message, chips, false)}
           onForYou={() => ask('', [], true)}
           onOpenSession={openSession}
           onNewChat={newChat}
+          onShowPlaces={showRecalled}
         />
       )}
       {instantOpen && (
         <InstantPanel
           friends={friends}
+          self={
+            accountApi.account
+              ? { id: accountApi.account.id, name: accountApi.account.name, avatar: profileExtra.avatar }
+              : null
+          }
           token={accountApi.token}
           signedIn={accountApi.account != null}
           position={userPosition}

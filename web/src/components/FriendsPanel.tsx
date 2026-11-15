@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { placeCollectionIds, type Collection } from '../collections'
-import type { Restaurant } from '../restaurants'
+import { readableTags, type Restaurant } from '../restaurants'
 import { CollectionMenu } from './CollectionMenu'
 import { PhotoGrid } from './PhotoGrid'
 
@@ -536,6 +536,7 @@ function PostCard({
   const place = postRestaurant(post)
   const memberIds = place.restId ? placeCollectionIds(collections, place.restId) : []
   const score = Math.max(0, Math.min(5, Math.round(post.rating)))
+  const tags = readableTags(post.tags)
 
   return (
     <article className="friends-post">
@@ -557,9 +558,9 @@ function PostCard({
               ))}
             </span>
           </div>
-          {post.tags.length > 0 && (
+          {tags.length > 0 && (
             <div className="friends-tags">
-              {post.tags.map((tag) => (
+              {tags.map((tag) => (
                 <span key={tag} className="friends-tag">
                   {tag}
                 </span>

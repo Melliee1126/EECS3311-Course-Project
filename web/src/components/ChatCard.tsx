@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type TransitionEvent } from 'react'
 import { createPortal } from 'react-dom'
 import type { SuggestedRestaurant } from '../assistant'
+import { readableCuisine } from '../restaurants'
 
 const CHIPS = ['Comfort food', 'Cafe & Brunch', 'Budget-friendly']
 
@@ -14,6 +15,7 @@ export type ChatSessionSummary = {
   id: string
   title: string
   updatedAt: number
+  places: SuggestedRestaurant[]
 }
 
 type Props = {
@@ -26,6 +28,7 @@ type Props = {
   onForYou: () => void
   onOpenSession: (id: string) => void
   onNewChat: () => void
+  onShowPlaces: (id: string, restId: string) => void
 }
 
 export function ChatCard({
@@ -38,12 +41,14 @@ export function ChatCard({
   onForYou,
   onOpenSession,
   onNewChat,
+  onShowPlaces,
 }: Props) {
   const [draft, setDraft] = useState('')
   const [selected, setSelected] = useState<string[]>([])
   const [localError, setLocalError] = useState<string | null>(null)
   const [historyPresent, setHistoryPresent] = useState(false)
   const [historyShown, setHistoryShown] = useState(false)
+  const [openFolderId, setOpenFolderId] = useState<string | null>(null)
   const logRef = useRef<HTMLDivElement>(null)
   const historyGeneration = useRef(0)
 
@@ -73,6 +78,7 @@ export function ChatCard({
   function closeHistory() {
     historyGeneration.current += 1
     setHistoryShown(false)
+    setOpenFolderId(null)
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       setHistoryPresent(false)
     }
@@ -156,21 +162,66 @@ export function ChatCard({
                 <p className="chat-status">No earlier chats.</p>
               ) : (
                 <ul className="history-list">
-                  {sessions.map((session) => (
-                    <li key={session.id}>
-                      <button
-                        type="button"
-                        aria-current={session.id === activeSessionId ? 'true' : undefined}
-                        onClick={() => {
-                          closeHistory()
-                          onOpenSession(session.id)
-                        }}
-                      >
-                        <span>{session.title}</span>
-                        <time dateTime={new Date(session.updatedAt).toISOString()}>{formatWhen(session.updatedAt)}</time>
-                      </button>
-                    </li>
-                  ))}
+                  {sessions.map((session) => {
+                    const folderOpen = openFolderId === session.id
+                    return (
+                      <li key={session.id}>
+                        <div className="history-row">
+                          <button
+                            type="button"
+                            className="history-open"
+                            aria-current={session.id === activeSessionId ? 'true' : undefined}
+                            onClick={() => {
+                              closeHistory()
+                              onOpenSession(session.id)
+                            }}
+                          >
+                            <span>{session.title}</span>
+                            <time dateTime={new Date(session.updatedAt).toISOString()}>{formatWhen(session.updatedAt)}</time>
+                          </button>
+                          <button
+                            type="button"
+                            className="history-folder"
+                            aria-label={`Restaurants from ${session.title}`}
+                            aria-expanded={folderOpen}
+                            onClick={() => setOpenFolderId(folderOpen ? null : session.id)}
+                          >
+                            <img src="/icons/folder.png" alt="" />
+                          </button>
+                        </div>
+                        {folderOpen &&
+                          (session.places.length === 0 ? (
+                            <p className="history-empty">No restaurants in this chat.</p>
+                          ) : (
+                            <ul className="history-places">
+                              {session.places.map((place) => (
+                                <li key={place.restId}>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      closeHistory()
+                                      onShowPlaces(session.id, place.restId)
+                                    }}
+                                  >
+                                    {place.photo ? (
+                                      <img src={place.photo} alt="" />
+                                    ) : (
+                                      <span className="history-place-photo" aria-hidden="true" />
+                                    )}
+                                    <span className="history-place-copy">
+                                      <span className="history-place-name">{place.name}</span>
+                                      <span className="history-place-meta">
+                                        {[readableCuisine(place.cuisine), place.priceRange].filter(Boolean).join(' · ')}
+                                      </span>
+                                    </span>
+                                  </button>
+                                </li>
+                              ))}
+                            </ul>
+                          ))}
+                      </li>
+                    )
+                  })}
                 </ul>
               )}
             </aside>

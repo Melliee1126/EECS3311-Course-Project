@@ -12,6 +12,7 @@ type Props = {
   friendsOpen: boolean
   instantOpen: boolean
   avatar: string
+  onHome: () => void
   onInstant: () => void
   onSaved: () => void
   onCreate: () => void
@@ -26,6 +27,7 @@ export function Sidebar({
   friendsOpen,
   instantOpen,
   avatar,
+  onHome,
   onInstant,
   onSaved,
   onCreate,
@@ -49,7 +51,9 @@ export function Sidebar({
   return (
     <aside className="sidebar">
       <div className="nav-column">
-        <img className="logo" src="/icons/APP_Logo.png" alt="" />
+        <button type="button" className="logo-button" aria-label="Home" onClick={onHome}>
+          <img className="logo" src="/icons/APP_Logo.png" alt="" />
+        </button>
         <nav className="rail" aria-label="Main">
           {NAV_ITEMS.map((item) => (
             <button

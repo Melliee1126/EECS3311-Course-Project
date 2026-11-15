@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { searchRestaurants } from '../places'
 import type { Review, ReviewDraft } from '../reviews'
-import type { Restaurant } from '../restaurants'
+import { placeCategoryTags, readableTag, readableTags, type Restaurant } from '../restaurants'
 import type { LatLng } from '../userLocation'
 import { PhotoFramer, type Placement } from './PhotoFramer'
 import { PhotoGrid } from './PhotoGrid'
@@ -65,8 +65,8 @@ export function ReviewPanel({ reviews, notice, bias, onPublish, onUpdate, onDele
   const preview = showAll ? reviews : reviews.slice(0, 2)
 
   function addTag() {
-    const next = tagDraft.trim()
-    if (!next || tags.includes(next) || tags.length >= 8 || next.length > 24) {
+    const next = readableTag(tagDraft)
+    if (!next || next.length > 24 || tags.length >= 8 || tags.some((tag) => tag.toLowerCase() === next.toLowerCase())) {
       setTagDraft('')
       return
     }
@@ -106,7 +106,7 @@ export function ReviewPanel({ reviews, notice, bias, onPublish, onUpdate, onDele
       tags: [],
     })
     setRating(review.rating)
-    setTags(review.tags)
+    setTags(readableTags(review.tags))
     setTagDraft('')
     setBody(review.body)
     const shots = review.photos?.length ? review.photos : review.photo ? [review.photo] : []
@@ -260,6 +260,8 @@ export function ReviewPanel({ reviews, notice, bias, onPublish, onUpdate, onDele
             aria-label="Clear restaurant"
             onClick={() => {
               setRestaurant(null)
+              setTags([])
+              setTagDraft('')
               setRestaurantQuery('')
               setMatches([])
               setError(null)
@@ -305,6 +307,8 @@ export function ReviewPanel({ reviews, notice, bias, onPublish, onUpdate, onDele
                   type="button"
                   onClick={() => {
                     setRestaurant(match)
+                    setTags(placeCategoryTags(match))
+                    setTagDraft('')
                     setPickerOpen(false)
                     setRestaurantQuery('')
                     setMatches([])
@@ -317,6 +321,36 @@ export function ReviewPanel({ reviews, notice, bias, onPublish, onUpdate, onDele
               </li>
             ))}
           </ul>
+        </div>
+      )}
+      {restaurant && (
+        <div className="review-tags" aria-label="Restaurant tags">
+          {tags.map((tag) => (
+            <button
+              key={tag}
+              type="button"
+              className="review-tag"
+              aria-label={`Remove ${tag}`}
+              onClick={() => setTags(tags.filter((item) => item !== tag))}
+            >
+              {tag} ×
+            </button>
+          ))}
+          <input
+            className="review-tag-input"
+            value={tagDraft}
+            placeholder="Add tag"
+            aria-label="Add a tag"
+            maxLength={24}
+            onChange={(event) => setTagDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                addTag()
+              }
+            }}
+            onBlur={addTag}
+          />
         </div>
       )}
       <div className="review-score">
@@ -337,33 +371,6 @@ export function ReviewPanel({ reviews, notice, bias, onPublish, onUpdate, onDele
             </button>
           ))}
         </span>
-      </div>
-      <div className="review-tags">
-        {tags.map((tag) => (
-          <button
-            key={tag}
-            type="button"
-            className="review-tag"
-            onClick={() => setTags(tags.filter((item) => item !== tag))}
-          >
-            {tag} ×
-          </button>
-        ))}
-        <input
-          className="review-tag-input"
-          value={tagDraft}
-          placeholder="Tag"
-          aria-label="Add a tag"
-          maxLength={24}
-          onChange={(event) => setTagDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              event.preventDefault()
-              addTag()
-            }
-          }}
-          onBlur={addTag}
-        />
       </div>
       <div className="review-write">
         <textarea

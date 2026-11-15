@@ -98,6 +98,21 @@ button {
   padding: 8px 0 28px;
 }
 
+.logo-button {
+  width: 54px;
+  height: 54px;
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+
+.logo-button:hover {
+  background: rgba(0, 0, 0, 0.08);
+}
+
 .logo {
   width: 54px;
   height: 54px;
@@ -317,6 +332,22 @@ button {
 
 .result-note {
   color: #8a5a3a;
+}
+
+.category-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.category-tag {
+  border-radius: 999px;
+  background: #efe6da;
+  color: #5c4636;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .result-source {
@@ -1808,7 +1839,8 @@ button {
 }
 
 .chat-history-new,
-.history-list li button {
+.history-open,
+.history-places button {
   width: 100%;
   border: 0;
   background: transparent;
@@ -1830,28 +1862,110 @@ button {
   overflow: auto;
 }
 
-.history-list li button {
+.history-row {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.history-open {
+  flex: 1;
+  width: auto;
   display: flex;
   justify-content: space-between;
   gap: 8px;
   border-radius: 8px;
+  min-width: 0;
 }
 
-.history-list li button span {
+.history-open span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.history-list li button time {
+.history-open time {
   flex: none;
   color: var(--muted);
   font-size: 12px;
 }
 
-.history-list li button[aria-current='true'],
-.history-list li button:hover,
+.history-folder {
+  flex: none;
+  width: 40px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+
+.history-folder img {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}
+
+.history-places {
+  list-style: none;
+  margin: 0 4px 6px 12px;
+  padding: 0;
+}
+
+.history-places button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 8px;
+}
+
+.history-places img,
+.history-place-photo {
+  width: 36px;
+  height: 36px;
+  flex: none;
+  border-radius: 8px;
+  object-fit: cover;
+  background: #efe8df;
+}
+
+.history-place-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.history-place-name,
+.history-place-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-place-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.history-place-meta,
+.history-empty {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.history-empty {
+  margin: 0;
+  padding: 0 12px 8px 16px;
+}
+
+.history-open[aria-current='true'],
+.history-open:hover,
+.history-folder:hover,
+.history-folder[aria-expanded='true'],
+.history-places button:hover,
 .chat-history-new:hover,
 .history-close:hover {
   background: #faf7f4;

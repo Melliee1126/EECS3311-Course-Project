@@ -23,7 +23,7 @@ import java.util.Map;
 /** Asks Places API (New) for restaurants. The website and the command line both use this. */
 public final class PlacesSearch {
     private static final URI SEARCH = URI.create("https://places.googleapis.com/v1/places:searchText");
-    private static final String FIELDS = "places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.priceLevel,places.priceRange,places.primaryType,places.photos";
+    private static final String FIELDS = "places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.priceLevel,places.priceRange,places.primaryType,places.types,places.photos";
     private static final double BIAS_METERS = 20_000;
     private static final int MAX_PHOTO = 2_000_000;
 
@@ -209,11 +209,12 @@ public final class PlacesSearch {
         Double longitude = coordinate(place.get("location"), "longitude");
         Location location = latitude == null || longitude == null ? null : new Location(latitude, longitude, address);
         String primaryType = text(place.get("primaryType"));
-        List<String> tags = primaryType.isBlank() ? List.of() : List.of(primaryType);
+        List<String> tags = PlaceTags.assign(name, primaryType, types(place.get("types")));
+        String cuisine = tags.isEmpty() ? cuisine(primaryType) : tags.get(0);
         Restaurant restaurant = new Restaurant(
                 "g:" + id,
                 name,
-                cuisine(primaryType),
+                cuisine,
                 address,
                 location,
                 rating(place.get("rating")),
@@ -260,6 +261,18 @@ public final class PlacesSearch {
 
     private static boolean photoName(String name) {
         return name.startsWith("places/") && name.contains("/photos/") && !name.contains("..") && !name.contains("?");
+    }
+
+    private static List<String> types(Object value) {
+        List<String> types = new ArrayList<>();
+        if (value instanceof List<?> list) {
+            for (Object item : list) {
+                if (item instanceof String text && !text.isBlank()) {
+                    types.add(text);
+                }
+            }
+        }
+        return types;
     }
 
     private static String cuisine(String primaryType) {

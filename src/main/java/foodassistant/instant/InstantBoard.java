@@ -15,7 +15,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
-/** Stores a photo sent to friends, and lists the photos those friends sent back. */
+/** Stores a photo sent to friends, and lists those photos plus the ones friends sent back. */
 public final class InstantBoard {
     private static final int MAX_PHOTO = 200_000;
     private static final DateTimeFormatter WHEN = DateTimeFormatter.ofPattern("MMM d", Locale.ENGLISH)
@@ -48,14 +48,8 @@ public final class InstantBoard {
 
     public String inboxResponse(String accountId) {
         List<String> ids = new ArrayList<>();
-        for (String id : database.instantIdsFor(accountId)) {
-            if (safeId(id) && !ids.contains(id)) {
-                ids.add(id);
-            }
-            if (ids.size() == 200) {
-                break;
-            }
-        }
+        collect(ids, database.instantIdsByAuthor(accountId));
+        collect(ids, database.instantIdsFor(accountId));
         List<Map<String, Object>> rows = new ArrayList<>();
         Map<String, String> names = new LinkedHashMap<>();
         Map<String, String> avatars = new LinkedHashMap<>();
@@ -111,6 +105,17 @@ public final class InstantBoard {
             throw new IllegalArgumentException("That photo is too large.");
         }
         return photo;
+    }
+
+    private static void collect(List<String> ids, List<String> more) {
+        for (String id : more) {
+            if (ids.size() == 200) {
+                return;
+            }
+            if (safeId(id) && !ids.contains(id)) {
+                ids.add(id);
+            }
+        }
     }
 
     private static boolean safeId(String id) {

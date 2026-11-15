@@ -30,8 +30,15 @@ type Ghost = {
   y: number
 }
 
+type Self = {
+  id: string
+  name: string
+  avatar: string
+}
+
 type Props = {
   friends: Friend[]
+  self: Self | null
   token: string | null
   signedIn: boolean
   position: LatLng | null
@@ -41,7 +48,7 @@ type Props = {
 const PHOTO_W = 1080
 const PHOTO_H = 1080
 
-export function InstantPanel({ friends, token, signedIn, position, onSignIn }: Props) {
+export function InstantPanel({ friends, self, token, signedIn, position, onSignIn }: Props) {
   const previewRef = useRef<HTMLDivElement>(null)
   const trashRef = useRef<HTMLDivElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -77,7 +84,8 @@ export function InstantPanel({ friends, token, signedIn, position, onSignIn }: P
   const lng = spot.lng.toFixed(2)
   const cameraApi = typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia
   const cameraState = !cameraApi ? 'off' : camera
-  const pickedFriend = friends.find((friend) => friend.id === picked) ?? null
+  const viewingSelf = self != null && picked === self.id
+  const pickedFriend = viewingSelf ? null : (friends.find((friend) => friend.id === picked) ?? null)
   const visible = snaps.filter((snap) => !picked || snap.authorId === picked)
   const query = search.trim().toLowerCase()
   const listed = friends.filter((friend) => friend.name.toLowerCase().includes(query))
@@ -393,9 +401,11 @@ export function InstantPanel({ friends, token, signedIn, position, onSignIn }: P
     setChosen(allChosen ? [] : friends.map((friend) => friend.id))
   }
 
-  function chooseFriend(id: string) {
-    setPicked((current) => (current === id ? null : id))
+  function openAlbum(id: string | null) {
+    setPicked((current) => (id != null && current === id ? null : id))
     setViewing(null)
+    setLibrary(true)
+    setSendOpen(false)
   }
 
   return (
@@ -419,7 +429,7 @@ export function InstantPanel({ friends, token, signedIn, position, onSignIn }: P
                 <div className="instant-grid">
                   {visible.length === 0 ? (
                     <div className="instant-empty">
-                      <p>{emptyCopy(signedIn, loadNote, pickedFriend)}</p>
+                      <p>{emptyCopy(signedIn, loadNote, pickedFriend, viewingSelf)}</p>
                       {!signedIn && (
                         <button type="button" className="instant-link" onClick={onSignIn}>
                           Sign in
@@ -558,32 +568,46 @@ export function InstantPanel({ friends, token, signedIn, position, onSignIn }: P
         <button
           type="button"
           className={picked ? 'instant-all' : 'instant-all is-on'}
-          onClick={() => {
-            setPicked(null)
-            setViewing(null)
-          }}
+          onClick={() => openAlbum(null)}
         >
           All Friends
         </button>
-        {friends.length === 0 ? (
+        <ul className="instant-people">
+          <li>
+            <button
+              type="button"
+              className={viewingSelf ? 'instant-friend is-on' : 'instant-friend'}
+              aria-pressed={viewingSelf}
+              onClick={() => {
+                if (!self) {
+                  onSignIn()
+                  return
+                }
+                openAlbum(self.id)
+              }}
+            >
+              <Avatar avatar={self?.avatar ?? ''} />
+              <span className="instant-friend-name">You</span>
+              <ChevronIcon />
+            </button>
+          </li>
+          {friends.map((friend) => (
+            <li key={friend.id}>
+              <button
+                type="button"
+                className={picked === friend.id ? 'instant-friend is-on' : 'instant-friend'}
+                aria-pressed={picked === friend.id}
+                onClick={() => openAlbum(friend.id)}
+              >
+                <Avatar avatar={friend.avatar} />
+                <span className="instant-friend-name">{friend.name}</span>
+                <ChevronIcon />
+              </button>
+            </li>
+          ))}
+        </ul>
+        {friends.length === 0 && (
           <p className="instant-circle-empty">{signedIn ? 'Friends you add show up here.' : 'Sign in to see your friends.'}</p>
-        ) : (
-          <ul className="instant-people">
-            {friends.map((friend) => (
-              <li key={friend.id}>
-                <button
-                  type="button"
-                  className={picked === friend.id ? 'instant-friend is-on' : 'instant-friend'}
-                  aria-pressed={picked === friend.id}
-                  onClick={() => chooseFriend(friend.id)}
-                >
-                  <Avatar avatar={friend.avatar} />
-                  <span className="instant-friend-name">{friend.name}</span>
-                  <ChevronIcon />
-                </button>
-              </li>
-            ))}
-          </ul>
         )}
       </aside>
       {sendOpen && !library && (
@@ -699,9 +723,10 @@ function Stars({ value }: { value: number }) {
   )
 }
 
-function emptyCopy(signedIn: boolean, loadNote: string | null, friend: Friend | null) {
+function emptyCopy(signedIn: boolean, loadNote: string | null, friend: Friend | null, mine: boolean) {
   if (!signedIn) return 'Sign in to see instants from friends.'
   if (loadNote) return loadNote
+  if (mine) return 'You have not sent an instant yet.'
   if (friend) return `${friend.name} has not sent you an instant yet.`
   return 'Instants friends send you show up here.'
 }

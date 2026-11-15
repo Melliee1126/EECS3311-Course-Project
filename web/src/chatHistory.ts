@@ -30,6 +30,23 @@ export function saveChatSessions(accountId: string, sessions: ChatSession[]) {
   localStorage.setItem(storageKey(accountId), JSON.stringify(sessions.slice(0, LIMIT)))
 }
 
+/** Every restaurant recommended in one chat, in the order they first appeared. */
+export function sessionPicks(messages: ChatMessage[]): SuggestedRestaurant[] {
+  const byId = new Map<string, SuggestedRestaurant>()
+  const order: string[] = []
+  for (const message of messages) {
+    if (message.role !== 'assistant') continue
+    for (const place of message.picks) {
+      if (!byId.has(place.restId)) order.push(place.restId)
+      byId.set(place.restId, place)
+    }
+  }
+  return order.flatMap((id) => {
+    const place = byId.get(id)
+    return place ? [place] : []
+  })
+}
+
 function sessionOf(value: unknown): ChatSession[] {
   if (!value || typeof value !== 'object') return []
   const item = value as Partial<ChatSession>

@@ -1,4 +1,5 @@
-import { hasLocation, type Restaurant } from '../restaurants'
+import { hasLocation, readableCuisine, visibleTags, type Restaurant } from '../restaurants'
+import { TagList } from './TagList'
 
 type Props = {
   restaurants: Restaurant[]
@@ -43,7 +44,7 @@ export function RestaurantCard({
                   <span className="result-name">{restaurant.name}</span>
                   <span className="result-meta">
                     {[
-                      restaurant.cuisine,
+                      readableCuisine(restaurant.cuisine),
                       restaurant.priceRange,
                       restaurant.rating > 0 ? String(restaurant.rating) : 'Unrated',
                     ]
@@ -51,6 +52,7 @@ export function RestaurantCard({
                       .join(' · ')}
                   </span>
                   <span className="result-address">{restaurant.address || 'No address on file'}</span>
+                  <TagList tags={visibleTags(restaurant, true)} />
                   {!hasLocation(restaurant) && (
                     <span className="result-note">Shown without a map pin</span>
                   )}

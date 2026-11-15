@@ -5,6 +5,7 @@ import foodassistant.model.Location;
 import foodassistant.model.Restaurant;
 import foodassistant.model.Review;
 import foodassistant.model.UserPreferences;
+import foodassistant.places.PlaceTags;
 import foodassistant.server.Json;
 
 import java.io.IOException;
@@ -181,6 +182,28 @@ public final class SupabaseDatabase {
 
     public void deleteInstant(String id) {
         request("DELETE", "instants?" + eq("id", id), null);
+    }
+
+    public List<String> instantIdsByAuthor(String accountId) {
+        String json = request(
+                "GET",
+                "instants?select=id&" + eq("account_id", accountId) + "&order=created_at.desc&limit=40",
+                null);
+        Object parsed = Json.parse(json);
+        List<String> ids = new ArrayList<>();
+        if (!(parsed instanceof List<?> list)) {
+            return ids;
+        }
+        for (Object item : list) {
+            if (!(item instanceof Map<?, ?> map)) {
+                continue;
+            }
+            Object id = map.get("id");
+            if (id instanceof String text && !text.isBlank()) {
+                ids.add(text);
+            }
+        }
+        return ids;
     }
 
     public List<String> instantIdsFor(String accountId) {
@@ -470,16 +493,17 @@ public final class SupabaseDatabase {
         Location location = latitude == null || longitude == null ? null : new Location(latitude, longitude, address);
         Double rating = number(map, "rating");
         String[] price = Restaurant.splitStoredPrice(text(map, "price_range"));
+        String name = text(map, "name");
         return new Restaurant(
                 text(map, "rest_id"),
-                text(map, "name"),
+                name,
                 text(map, "cuisine"),
                 address,
                 location,
                 rating == null ? 0 : rating,
                 price[0],
                 price[1],
-                tags(map.get("tags")),
+                PlaceTags.keep(name, tags(map.get("tags"))),
                 text(map, "status").isBlank() ? "discovered" : text(map, "status"));
     }
 
