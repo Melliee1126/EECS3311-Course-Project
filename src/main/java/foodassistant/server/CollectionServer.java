@@ -7,6 +7,7 @@ import foodassistant.account.CollectionStore;
 import foodassistant.account.SignInRequired;
 import foodassistant.account.SupabaseDatabase;
 import foodassistant.agent.FoodAgent;
+import foodassistant.chat.ChatHistory;
 import foodassistant.collection.CollectionLibrary;
 import foodassistant.feedback.FeedbackPublisher;
 import foodassistant.instant.InstantBoard;
@@ -42,6 +43,7 @@ public final class CollectionServer {
     private final FoodAgent agent;
     private final FeedbackPublisher feedback;
     private final InstantBoard instants;
+    private final ChatHistory chats;
     private final HttpServer server;
 
     public CollectionServer(
@@ -53,6 +55,7 @@ public final class CollectionServer {
             FoodAgent agent,
             FeedbackPublisher feedback,
             InstantBoard instants,
+            ChatHistory chats,
             int port) throws IOException {
         this.accounts = accounts;
         this.collections = collections;
@@ -62,6 +65,7 @@ public final class CollectionServer {
         this.agent = agent;
         this.feedback = feedback;
         this.instants = instants;
+        this.chats = chats;
         this.server = HttpServer.create(new InetSocketAddress(port), 0);
         this.server.createContext("/api/accounts", this::accounts);
         this.server.createContext("/api/sessions", this::sessions);
@@ -89,8 +93,9 @@ public final class CollectionServer {
         PlacesSearch places = PlacesSearch.fromFile(settings);
         FoodAgent agent = new FoodAgent(places, memory, LLMFactory.fromFile(settings));
         InstantBoard instants = new InstantBoard(database, accounts);
+        ChatHistory chats = new ChatHistory(database);
         CollectionServer server = new CollectionServer(
-                accounts, collections, reviews, places, memory, agent, feedback, instants, port);
+                accounts, collections, reviews, places, memory, agent, feedback, instants, chats, port);
         server.start();
         System.out.println("Java program listening on http://localhost:" + port);
     }
@@ -293,11 +298,45 @@ public final class CollectionServer {
         }
     }
 
+    private void savedChats(HttpExchange exchange) throws IOException {
+        try {
+            Account account = requireAccount(exchange);
+            String method = exchange.getRequestMethod();
+            if ("GET".equals(method)) {
+                send(exchange, 200, chats.list(account.getId()));
+                return;
+            }
+            if ("PUT".equals(method)) {
+                send(exchange, 200, chats.replace(account.getId(), object(body(exchange))));
+                return;
+            }
+            send(exchange, 405, error("Method not allowed"));
+        } catch (SignInRequired exception) {
+            send(exchange, 401, error(exception.getMessage()));
+        } catch (IllegalArgumentException exception) {
+            send(exchange, 400, error(exception.getMessage()));
+        } catch (RuntimeException exception) {
+            String message = exception.getMessage() == null ? "" : exception.getMessage();
+            if (message.contains("chat_sessions")) {
+                send(exchange, 500, error("Run supabase/schema.sql again so chat history can be saved."));
+                return;
+            }
+            String method = exchange.getRequestMethod();
+            send(exchange, 500, error("GET".equals(method)
+                    ? "Could not load the chat history."
+                    : "Could not save the chat history."));
+        }
+    }
+
     private void chat(HttpExchange exchange) throws IOException {
         if (preflight(exchange)) {
             return;
         }
         try {
+            if ("/api/chat/history".equals(exchange.getRequestURI().getPath())) {
+                savedChats(exchange);
+                return;
+            }
             if (!"POST".equals(exchange.getRequestMethod())) {
                 send(exchange, 405, error("Method not allowed"));
                 return;
@@ -678,7 +717,7 @@ public final class CollectionServer {
         byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
         exchange.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
-        exchange.getResponseHeaders().set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS");
+        exchange.getResponseHeaders().set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
         exchange.getResponseHeaders().set("Access-Control-Allow-Headers", "Content-Type, Authorization");
         exchange.sendResponseHeaders(status, status == 204 ? -1 : bytes.length);
         if (status != 204) {

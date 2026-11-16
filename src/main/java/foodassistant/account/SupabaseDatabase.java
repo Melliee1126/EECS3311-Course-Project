@@ -184,6 +184,44 @@ public final class SupabaseDatabase {
         request("DELETE", "instants?" + eq("id", id), null);
     }
 
+    public String chatSessions(String accountId) {
+        return request(
+                "GET",
+                "chat_sessions?select=id,title,updated_at,messages&" + eq("account_id", accountId)
+                        + "&order=updated_at.desc&limit=20",
+                null);
+    }
+
+    public void upsertChatSessions(String accountId, List<Map<String, Object>> rows) {
+        if (rows.isEmpty()) {
+            return;
+        }
+        for (Map<String, Object> row : rows) {
+            row.put("account_id", accountId);
+        }
+        request(
+                "POST",
+                "chat_sessions?on_conflict=account_id,id",
+                Json.stringify(rows),
+                "resolution=merge-duplicates,return=minimal");
+        String listed = request(
+                "GET",
+                "chat_sessions?select=id&" + eq("account_id", accountId) + "&order=updated_at.desc",
+                null);
+        List<String> extra = new ArrayList<>();
+        Object parsed = Json.parse(listed);
+        if (parsed instanceof List<?> list) {
+            for (int i = 20; i < list.size(); i++) {
+                if (list.get(i) instanceof Map<?, ?> map && map.get("id") instanceof String id && !id.isBlank()) {
+                    extra.add(id);
+                }
+            }
+        }
+        if (!extra.isEmpty()) {
+            request("DELETE", "chat_sessions?" + eq("account_id", accountId) + "&" + idIn(extra), null);
+        }
+    }
+
     public List<String> instantIdsByAuthor(String accountId) {
         String json = request(
                 "GET",
@@ -626,6 +664,18 @@ public final class SupabaseDatabase {
 
     private static String eq(String column, String value) {
         return column + "=eq." + url(value);
+    }
+
+    private static String idIn(List<String> ids) {
+        StringBuilder filter = new StringBuilder("id=in.(");
+        for (int i = 0; i < ids.size(); i++) {
+            if (i > 0) {
+                filter.append(',');
+            }
+            filter.append(url(ids.get(i)));
+        }
+        filter.append(')');
+        return filter.toString();
     }
 
     private static String url(String value) {

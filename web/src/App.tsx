@@ -5,7 +5,15 @@ import { askAssistant, readTaste, saveTaste, type SuggestedRestaurant, type Tast
 import { AccountPanel } from './components/AccountPanel'
 import { ChatCard, type ChatMessage } from './components/ChatCard'
 import { RecommendationRow } from './components/RecommendationRow'
-import { loadChatSessions, saveChatSessions, sessionPicks, type ChatSession } from './chatHistory'
+import {
+  loadAccountHistory,
+  persistChatHistory,
+  retainOpenThread,
+  sessionFromThread,
+  sessionPicks,
+  withSession,
+  type ChatSession,
+} from './chatHistory'
 import { CollectionsPanel, CreateCollectionDialog } from './components/CollectionsPanel'
 import { MapBackground } from './components/MapBackground'
 import { PlaceDetail } from './components/PlaceDetail'
@@ -89,6 +97,7 @@ function FoodApp() {
   const [recalled, setRecalled] = useState<SuggestedRestaurant[] | null>(null)
   const [assistantBusy, setAssistantBusy] = useState(false)
   const [learned, setLearned] = useState<TasteSnapshot>(EMPTY_TASTE)
+  const [historyNote, setHistoryNote] = useState<string | null>(null)
   const accountApi = useAccount()
   const profileExtra = useProfileExtra(accountApi.account?.id ?? null)
   const collectionsApi = useCollections(accountApi.token, accountApi.signOut)
@@ -100,6 +109,16 @@ function FoodApp() {
   const accountId = accountApi.account?.id ?? null
   const accountIdRef = useRef(accountId)
   accountIdRef.current = accountId
+  const tokenRef = useRef(accountApi.token)
+  tokenRef.current = accountApi.token
+  const activeIdRef = useRef<string | null>(null)
+  const threadRef = useRef<ChatMessage[]>([])
+  const historyReady = useRef(false)
+  const historySave = useRef(0)
+  const sessionsRef = useRef(sessions)
+  sessionsRef.current = sessions
+  activeIdRef.current = activeId
+  threadRef.current = thread
 
   useEffect(() => {
     positionRef.current = userPosition
@@ -118,24 +137,46 @@ function FoodApp() {
   }, [accountApi.token, profileExtra.avatar])
 
   useEffect(() => {
+    historyReady.current = false
+    historySave.current += 1
+    setHistoryNote(null)
     setActiveId(null)
     setThread([])
-    setSessions(accountId ? loadChatSessions(accountId) : NO_SESSIONS)
+    setSessions(NO_SESSIONS)
+    const token = tokenRef.current
+    if (!accountId || !token) return
+    let cancelled = false
+    void loadAccountHistory(token, accountId).then((loaded) => {
+      if (cancelled) return
+      const next = retainOpenThread(loaded.sessions, activeIdRef.current, threadRef.current)
+      historyReady.current = true
+      setSessions(next)
+      setHistoryNote(loaded.error)
+      if (next !== loaded.sessions) {
+        const generation = ++historySave.current
+        void persistChatHistory(token, accountId, next).then((saved) => {
+          if (cancelled || historySave.current !== generation) return
+          if (saved.sessions) setSessions(retainOpenThread(saved.sessions, activeIdRef.current, threadRef.current))
+          setHistoryNote(saved.error)
+        })
+      }
+    })
+    return () => {
+      cancelled = true
+    }
   }, [accountId])
 
   useEffect(() => {
+    const token = tokenRef.current
     const id = accountIdRef.current
-    if (!id || !activeId || thread.length === 0) return
-    setSessions((current) => {
-      const previous = current.find((session) => session.id === activeId)
-      const title =
-        previous?.title || thread.find((message) => message.role === 'user')?.text.slice(0, 48) || 'Chat'
-      const next = [
-        { id: activeId, title, updatedAt: Date.now(), messages: thread },
-        ...current.filter((session) => session.id !== activeId),
-      ].slice(0, 20)
-      saveChatSessions(id, next)
-      return next
+    if (!historyReady.current || !token || !id || !activeId || thread.length === 0) return
+    const next = withSession(sessionsRef.current, sessionFromThread(sessionsRef.current, activeId, thread))
+    setSessions(next)
+    const generation = ++historySave.current
+    void persistChatHistory(token, id, next).then((saved) => {
+      if (historySave.current !== generation) return
+      if (saved.sessions) setSessions(retainOpenThread(saved.sessions, activeIdRef.current, threadRef.current))
+      setHistoryNote(saved.error)
     })
   }, [thread, activeId])
 
@@ -474,6 +515,16 @@ function FoodApp() {
     setSelected(null)
   }
 
+  function refreshHistory() {
+    const token = tokenRef.current
+    const id = accountIdRef.current
+    if (!historyReady.current || !token || !id) return
+    void loadAccountHistory(token, id).then((loaded) => {
+      setSessions(retainOpenThread(loaded.sessions, activeIdRef.current, threadRef.current))
+      setHistoryNote(loaded.error)
+    })
+  }
+
   function openSession(id: string) {
     const session = sessions.find((item) => item.id === id)
     if (!session) return
@@ -636,6 +687,8 @@ function FoodApp() {
           onOpenSession={openSession}
           onNewChat={newChat}
           onShowPlaces={showRecalled}
+          onRefreshHistory={refreshHistory}
+          historyNote={historyNote}
         />
       )}
       {instantOpen && (

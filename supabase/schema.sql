@@ -91,6 +91,15 @@ create table if not exists instant_receipts (
   primary key (instant_id, account_id)
 );
 
+create table if not exists chat_sessions (
+  account_id text not null references accounts (id) on delete cascade,
+  id text not null,
+  title text not null,
+  updated_at bigint not null,
+  messages jsonb not null default '[]'::jsonb,
+  primary key (account_id, id)
+);
+
 alter table accounts enable row level security;
 alter table collections enable row level security;
 alter table places enable row level security;
@@ -100,3 +109,4 @@ alter table avatars enable row level security;
 alter table taste_profiles enable row level security;
 alter table instants enable row level security;
 alter table instant_receipts enable row level security;
+alter table chat_sessions enable row level security;

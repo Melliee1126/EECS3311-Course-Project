@@ -29,6 +29,8 @@ type Props = {
   onOpenSession: (id: string) => void
   onNewChat: () => void
   onShowPlaces: (id: string, restId: string) => void
+  onRefreshHistory: () => void
+  historyNote: string | null
 }
 
 export function ChatCard({
@@ -42,6 +44,8 @@ export function ChatCard({
   onOpenSession,
   onNewChat,
   onShowPlaces,
+  onRefreshHistory,
+  historyNote,
 }: Props) {
   const [draft, setDraft] = useState('')
   const [selected, setSelected] = useState<string[]>([])
@@ -69,6 +73,7 @@ export function ChatCard({
 
   function openHistory() {
     const generation = ++historyGeneration.current
+    onRefreshHistory()
     setHistoryPresent(true)
     requestAnimationFrame(() => {
       if (historyGeneration.current === generation) setHistoryShown(true)
@@ -158,6 +163,7 @@ export function ChatCard({
               >
                 New chat
               </button>
+              {historyNote && <p className="chat-status">{historyNote}</p>}
               {sessions.length === 0 ? (
                 <p className="chat-status">No earlier chats.</p>
               ) : (
