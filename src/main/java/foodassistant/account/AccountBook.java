@@ -126,6 +126,13 @@ public final class AccountBook {
         friends.cancel(accountId, friendId);
     }
 
+    public synchronized void removeFriend(String accountId, String friendId) {
+        if (friendId == null || friendId.isBlank() || accountId.equals(friendId)) {
+            throw new IllegalArgumentException("That friend was not found.");
+        }
+        friends.remove(accountId, friendId);
+    }
+
     public synchronized void saveAvatar(String accountId, String avatar) {
         if (avatar == null || avatar.isBlank()) {
             avatars.save(accountId, "");

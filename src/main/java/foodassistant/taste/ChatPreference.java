@@ -21,11 +21,16 @@ public final class ChatPreference {
     public record Signal(String food, int weight) {
     }
 
-    public record Reading(List<Signal> stated, List<String> requested, List<String> cleared) {
+    public record Reading(List<Signal> stated, List<String> requested, List<String> cleared, List<String> declined) {
         public Reading {
             stated = stated == null ? List.of() : List.copyOf(stated);
             requested = requested == null ? List.of() : List.copyOf(requested);
             cleared = cleared == null ? List.of() : List.copyOf(cleared);
+            declined = declined == null ? List.of() : List.copyOf(declined);
+        }
+
+        public Reading(List<Signal> stated, List<String> requested, List<String> cleared) {
+            this(stated, requested, cleared, List.of());
         }
     }
 
@@ -38,11 +43,25 @@ public final class ChatPreference {
     private record Hit(int start, String food) {
     }
 
-    private record ClauseResult(List<Signal> stated, List<String> requested, List<String> foods, int pronounWeight) {
+    private record ClauseResult(
+            List<Signal> stated,
+            List<String> requested,
+            List<String> declined,
+            List<String> foods,
+            int pronounWeight) {
     }
 
+    /** This meal only. A negative weight would be saved on the taste profile. */
+    private static final int SKIP_NOW = Integer.MIN_VALUE + 1;
+
     private static final List<Rule> RULES = List.of(
-            rule("(?:do not|dont) want", 0),
+            rule("(?:do not|dont) want", SKIP_NOW),
+            rule("not in the mood(?: for)?", SKIP_NOW),
+            rule("anything but", SKIP_NOW),
+            rule("other than", SKIP_NOW),
+            rule("except(?: for)?", SKIP_NOW),
+            rule("rather not", SKIP_NOW),
+            rule("skip", SKIP_NOW),
             rule("(?:i would like|id like|would like)", 0),
             rule("not sure", Integer.MIN_VALUE),
             rule("(?:feel like|in the mood(?: for)?|looking for)", 0),
@@ -103,10 +122,12 @@ public final class ChatPreference {
                 .replaceAll("[\\u2018\\u2019\\u02bc']", "")
                 .replaceAll("[?!]", ".")
                 .replaceAll("\\s+", " ")
+                .replaceAll("\\banything but\\b", "except")
                 .trim();
         Map<String, Integer> scores = new LinkedHashMap<>();
         Set<String> requested = new LinkedHashSet<>();
         Set<String> cleared = new LinkedHashSet<>();
+        Set<String> declined = new LinkedHashSet<>();
         List<String> carry = List.of();
         for (String clause : clauses(normal)) {
             ClauseResult result = interpret(clause);
@@ -114,9 +135,15 @@ public final class ChatPreference {
                 scores.merge(signal.food, signal.weight, Integer::sum);
             }
             requested.addAll(result.requested);
-            if (result.stated.isEmpty() && result.requested.isEmpty() && result.pronounWeight != 0 && !carry.isEmpty()) {
-                for (String food : carry) {
-                    scores.merge(food, result.pronounWeight, Integer::sum);
+            declined.addAll(result.declined);
+            if (result.stated.isEmpty() && result.requested.isEmpty() && result.declined.isEmpty()
+                    && result.pronounWeight != 0 && !carry.isEmpty()) {
+                if (result.pronounWeight == SKIP_NOW) {
+                    declined.addAll(carry);
+                } else {
+                    for (String food : carry) {
+                        scores.merge(food, result.pronounWeight, Integer::sum);
+                    }
                 }
             }
             if (!result.foods.isEmpty()) {
@@ -139,7 +166,9 @@ public final class ChatPreference {
             int byWeight = Integer.compare(Math.abs(right.weight), Math.abs(left.weight));
             return byWeight != 0 ? byWeight : left.food.compareToIgnoreCase(right.food);
         });
-        return new Reading(stated, List.copyOf(requested), List.copyOf(cleared));
+        declined.removeAll(requested);
+        declined.removeAll(cleared);
+        return new Reading(stated, List.copyOf(requested), List.copyOf(cleared), List.copyOf(declined));
     }
 
     public static String note(Reading reading) {
@@ -176,13 +205,18 @@ public final class ChatPreference {
                 foods.add(signal.food);
             }
         }
+        for (String food : reading.declined()) {
+            if (!reading.requested.contains(food) && !foods.contains(food)) {
+                foods.add(food);
+            }
+        }
         return foods;
     }
 
     private static ClauseResult interpret(String clause) {
         String text = clause.replaceAll("[^a-z0-9\\s]", " ").replaceAll("\\s+", " ").trim();
         if (text.isEmpty()) {
-            return new ClauseResult(List.of(), List.of(), List.of(), 0);
+            return new ClauseResult(List.of(), List.of(), List.of(), List.of(), 0);
         }
         List<Cue> cues = cues(text);
         if (text.contains("used to")) {
@@ -194,10 +228,15 @@ public final class ChatPreference {
         List<Hit> hits = foodsIn(text);
         List<Signal> stated = new ArrayList<>();
         List<String> requested = new ArrayList<>();
+        List<String> declined = new ArrayList<>();
         List<String> foods = new ArrayList<>();
         for (Hit hit : hits) {
             foods.add(hit.food);
             Cue cue = nearest(cues, hit.start);
+            if (cue != null && cue.weight == SKIP_NOW) {
+                add(declined, hit.food);
+                continue;
+            }
             if (cue == null || cue.weight == 0 || cue.weight == Integer.MIN_VALUE) {
                 if (cue != null && cue.weight == 0) {
                     add(requested, hit.food);
@@ -208,9 +247,16 @@ public final class ChatPreference {
         }
         int pronounWeight = 0;
         if (hits.isEmpty() && pronoun(text)) {
-            pronounWeight = strongest(cues);
+            boolean skip = false;
+            for (Cue cue : cues) {
+                if (cue.weight == SKIP_NOW) {
+                    skip = true;
+                    break;
+                }
+            }
+            pronounWeight = skip ? SKIP_NOW : strongest(cues);
         }
-        return new ClauseResult(stated, requested, foods, pronounWeight);
+        return new ClauseResult(stated, requested, declined, foods, pronounWeight);
     }
 
     private static boolean aboutAssistant(String text) {
@@ -224,7 +270,7 @@ public final class ChatPreference {
     private static int strongest(List<Cue> cues) {
         int weight = 0;
         for (Cue cue : cues) {
-            if (cue.weight == Integer.MIN_VALUE) {
+            if (cue.weight == Integer.MIN_VALUE || cue.weight == SKIP_NOW) {
                 continue;
             }
             if (Math.abs(cue.weight) > Math.abs(weight)) {

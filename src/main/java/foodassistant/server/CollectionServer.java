@@ -193,6 +193,12 @@ public final class CollectionServer {
                 send(exchange, 200, AccountBook.circleResponse(accounts.circle(account.getId())));
                 return;
             }
+            if ("POST".equals(method) && path.endsWith("/remove")) {
+                Map<String, Object> body = object(body(exchange));
+                accounts.removeFriend(account.getId(), text(body, "id"));
+                send(exchange, 200, AccountBook.circleResponse(accounts.circle(account.getId())));
+                return;
+            }
             if ("POST".equals(method) && path.endsWith("/respond")) {
                 Map<String, Object> body = object(body(exchange));
                 Object flag = body.get("accept");

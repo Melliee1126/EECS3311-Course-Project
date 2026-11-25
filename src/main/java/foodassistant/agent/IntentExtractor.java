@@ -24,6 +24,7 @@ public final class IntentExtractor {
             intent: "search" or "ask"
             Use search when they name a dish, cuisine, restaurant, budget, or ask for places.
             Use ask when the request is vague, such as "I'm hungry" or "somewhere nice".
+            If they refuse a food, as in "I don't want Korean today" or "anything but sushi", leave that food out of dish and cuisine. That is still a search for something else.
             Words such as fancy-looking, stylish, aesthetic, elegant, upscale, and beautiful interior are a mood. Leave budget empty unless they name a price, cheap, inexpensive, affordable, or expensive.
             A follow-up such as "what can you find", "anything is fine", "show me alternatives", "you can't find it?", or "yes" keeps the earlier kind of place and area and uses search.
             Do not invent a dish, cuisine, budget, or neighborhood they did not say.

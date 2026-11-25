@@ -37,6 +37,16 @@ public final class FoodAssistantCli {
     }
 
     private static void run(String[] args) throws IOException, InterruptedException {
+        for (String arg : args) {
+            if ("--chat".equals(arg)) {
+                try {
+                    AgentChat.run(args);
+                } catch (IllegalArgumentException | IllegalStateException | IOException exception) {
+                    System.err.println(exception.getMessage());
+                }
+                return;
+            }
+        }
         String query = "";
         String cuisine = "";
         boolean mapAvailable = true;
@@ -111,6 +121,10 @@ public final class FoodAssistantCli {
                 Food search
                   java -cp out foodassistant.cli.FoodAssistantCli --query text [--cuisine text] [--unavailable]
                 The Java server must already be running. --unavailable prints a list instead of map pins.
+
+                Food agent
+                  java -cp out foodassistant.cli.FoodAssistantCli --chat [--email you@example.com --password secret] [--file requests.txt]
+                Reads each line from the terminal, or from --file. The Java server does not need to be running.
                 """);
     }
 }

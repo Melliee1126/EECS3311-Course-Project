@@ -89,6 +89,14 @@ public final class FriendStore {
         database.deleteFriendship(link.fromId(), link.toId());
     }
 
+    public void remove(String accountId, String friendId) {
+        FriendLink link = between(accountId, friendId);
+        if (link == null || !"accepted".equals(link.status())) {
+            throw new IllegalArgumentException("That friend was not found.");
+        }
+        database.deleteFriendship(link.fromId(), link.toId());
+    }
+
     private List<String> ids(String accountId, String status) {
         List<String> ids = new ArrayList<>();
         for (FriendLink link : database.linksFor(accountId)) {

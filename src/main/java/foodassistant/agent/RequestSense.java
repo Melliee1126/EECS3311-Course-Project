@@ -1,6 +1,7 @@
 package foodassistant.agent;
 
 import foodassistant.model.FoodWords;
+import foodassistant.taste.ChatPreference;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -55,7 +56,7 @@ final class RequestSense {
             "waterfront");
 
     private static final Pattern FILLER = Pattern.compile(
-            "\\b(any|some|a|an|the|restaurants?|places?|that|have|has|with|find|me|show|want|i|im|i'm|something|somewhere|looking|for|near|nearby|you|it|of|to|do|can|could|please|just|food|eat|hungry|today|what|should|good|really|very|super|kind|bit|little|get|like|and|or|in|at|around|on|my|your|this|these|those|one)\\b");
+            "\\b(any|some|a|an|the|restaurants?|places?|that|have|has|with|find|me|show|want|i|im|i'm|something|somewhere|looking|for|near|nearby|you|it|of|to|do|dont|don't|not|no|skip|except|can|could|please|just|food|eat|hungry|today|what|should|good|really|very|super|kind|bit|little|get|like|and|or|in|at|around|on|my|your|this|these|those|one)\\b");
 
     private static final Pattern LEFTOVER = Pattern.compile("\\b(shop|shops|spot|spots|joint|bar|bars|house|room|interior|looking)\\b");
 
@@ -72,25 +73,33 @@ final class RequestSense {
                 source = earlier;
             }
         }
-        String cuisine = String.join(" ", FoodWords.mentioned(source));
+        List<String> declined = ChatPreference.rejected(ChatPreference.read(source));
+        String cuisine = withoutFoods(String.join(" ", FoodWords.mentioned(source)), declined);
         String location = locationOf(source);
         String budget = budgetFrom(source);
         String style = atmosphereLabel(source);
-        String dish = specificFood(source);
+        String dish = withoutFoods(specificFood(source), declined);
+        if (FoodWords.mentioned(dish).isEmpty()) {
+            dish = "";
+        }
         if (covers(cuisine, dish)) {
             dish = "";
         }
         if (dish.isBlank() && parsed != null) {
-            String hinted = specificFood(parsed.dish());
+            String hinted = withoutFoods(specificFood(parsed.dish()), declined);
+            if (FoodWords.mentioned(hinted).isEmpty()) {
+                hinted = "";
+            }
             if (!hinted.isBlank() && sourceContains(source, hinted) && !covers(cuisine, hinted)) {
                 dish = hinted;
             }
         }
         boolean named = !dish.isBlank() || !cuisine.isBlank();
+        boolean skipping = !declined.isEmpty();
         String intent = "search";
-        if (vague(latestNormal) && !named && budget.isBlank() && location.isBlank()) {
+        if (vague(latestNormal) && !named && !skipping && budget.isBlank() && location.isBlank()) {
             intent = "ask";
-        } else if (!named && location.isBlank() && budget.isBlank()) {
+        } else if (!named && !skipping && location.isBlank() && budget.isBlank()) {
             intent = "ask";
         }
         if (latestNormal.contains("surprise") && dish.isBlank() && cuisine.isBlank() && location.isBlank() && budget.isBlank()) {
@@ -290,6 +299,17 @@ final class RequestSense {
         String remaining = " " + text + " ";
         for (String area : AREAS) {
             remaining = remaining.replace(" " + area + " ", " ");
+        }
+        return remaining.replaceAll("\\s+", " ").trim();
+    }
+
+    private static String withoutFoods(String text, List<String> declined) {
+        if (text == null || text.isBlank() || declined == null || declined.isEmpty()) {
+            return text == null ? "" : text;
+        }
+        String remaining = " " + FoodWords.normalize(text) + " ";
+        for (String food : declined) {
+            remaining = remaining.replace(" " + FoodWords.normalize(food) + " ", " ");
         }
         return remaining.replaceAll("\\s+", " ").trim();
     }

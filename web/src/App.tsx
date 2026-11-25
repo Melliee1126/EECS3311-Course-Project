@@ -407,6 +407,28 @@ function FoodApp() {
     }
   }
 
+  async function removeFriend(id: string): Promise<string | null> {
+    if (!accountApi.token) return 'Sign in to find a friend.'
+    try {
+      const response = await fetch('/api/friends/remove', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accountApi.token}`,
+        },
+        body: JSON.stringify({ id }),
+      })
+      const payload = (await response.json().catch(() => null)) as FriendPayload | null
+      if (!response.ok || !payload) {
+        return payload?.error ?? 'The Java backend is not running.'
+      }
+      applyCircle(payload, setFriends, setIncoming, setOutgoing, setFriendPosts)
+      return null
+    } catch {
+      return 'The Java backend is not running.'
+    }
+  }
+
   async function clearFriend(id: string): Promise<string | null> {
     if (!accountApi.token) return 'Sign in to find a friend.'
     try {
@@ -725,6 +747,7 @@ function FoodApp() {
           onAdd={addFriend}
           onRespond={respondFriend}
           onClear={clearFriend}
+          onRemove={removeFriend}
         />
       )}
       {reviewOpen && (

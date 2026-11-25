@@ -60,6 +60,7 @@ type Props = {
   onAdd: (id: string) => Promise<FriendLookup>
   onRespond: (id: string, accept: boolean) => Promise<string | null>
   onClear: (id: string) => Promise<string | null>
+  onRemove: (id: string) => Promise<string | null>
 }
 
 const PREVIEW = 4
@@ -78,6 +79,7 @@ export function FriendsPanel({
   onAdd,
   onRespond,
   onClear,
+  onRemove,
 }: Props) {
   const [adding, setAdding] = useState(false)
   const openAdd = () => setAdding(true)
@@ -109,6 +111,7 @@ export function FriendsPanel({
           onAdd={openAdd}
           onRespond={onRespond}
           onClear={onClear}
+          onRemove={onRemove}
         />
       )}
     </section>
@@ -286,6 +289,7 @@ function Feed({
   onAdd,
   onRespond,
   onClear,
+  onRemove,
 }: {
   friends: Friend[]
   posts: FriendPost[]
@@ -299,11 +303,14 @@ function Feed({
   onAdd: () => void
   onRespond: (id: string, accept: boolean) => Promise<string | null>
   onClear: (id: string) => Promise<string | null>
+  onRemove: (id: string) => Promise<string | null>
 }) {
   const [expanded, setExpanded] = useState(false)
   const [tab, setTab] = useState<'feed' | 'requests'>(friends.length === 0 ? 'requests' : 'feed')
   const [busyId, setBusyId] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [pending, setPending] = useState<Friend | null>(null)
+  const [removeNote, setRemoveNote] = useState<string | null>(null)
   const canFold = friends.length > PREVIEW
   const folded = canFold && !expanded
   const shown = folded ? friends.slice(0, PREVIEW - 1) : friends
@@ -326,6 +333,20 @@ function Feed({
     void onClear(id).then((error) => {
       setBusyId(null)
       setNotice(error)
+    })
+  }
+
+  function confirmRemove() {
+    if (!pending || busyId) return
+    setBusyId(pending.id)
+    setRemoveNote(null)
+    void onRemove(pending.id).then((error) => {
+      setBusyId(null)
+      if (error) {
+        setRemoveNote(error)
+        return
+      }
+      setPending(null)
     })
   }
 
@@ -373,7 +394,14 @@ function Feed({
             <ul>
               {shown.map((friend) => (
                 <li key={friend.id}>
-                  <Person name={friend.name} avatar={friend.avatar} />
+                  <Person
+                    name={friend.name}
+                    avatar={friend.avatar}
+                    onRemove={() => {
+                      setRemoveNote(null)
+                      setPending(friend)
+                    }}
+                  />
                 </li>
               ))}
               {folded && (
@@ -410,6 +438,23 @@ function Feed({
             </ul>
           )}
         </>
+      )}
+      {pending && (
+        <div className="friends-confirm-backdrop">
+          <div className="friends-confirm" role="dialog" aria-modal="true" aria-labelledby="remove-friend-title">
+            <h2 id="remove-friend-title">Remove {pending.name}?</h2>
+            <p>Are you sure? They will leave your friends list.</p>
+            {removeNote && <p className="friends-add-note">{removeNote}</p>}
+            <div className="friends-confirm-actions">
+              <button type="button" className="friends-decline" disabled={busyId === pending.id} onClick={() => setPending(null)}>
+                Cancel
+              </button>
+              <button type="button" className="friends-accept" disabled={busyId === pending.id} onClick={confirmRemove}>
+                Remove
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
@@ -506,13 +551,20 @@ function RequestList({
   )
 }
 
-function Person({ name, avatar = '' }: { name: string; avatar?: string }) {
+function Person({ name, avatar = '', onRemove }: { name: string; avatar?: string; onRemove?: () => void }) {
   return (
     <div className="friends-person">
-      <span className="friends-avatar">
-        {avatar ? <img src={avatar} alt="" /> : <PersonGlyph />}
+      <span className="friends-avatar-wrap">
+        <span className="friends-avatar">
+          {avatar ? <img src={avatar} alt="" /> : <PersonGlyph />}
+        </span>
+        {onRemove && (
+          <button type="button" className="friends-remove" aria-label={`Remove ${name}`} onClick={onRemove}>
+            ×
+          </button>
+        )}
       </span>
-      <span>{name}</span>
+      <span className="friends-person-name">{name}</span>
     </div>
   )
 }
